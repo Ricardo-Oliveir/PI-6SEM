@@ -1,0 +1,205 @@
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap');
+
+:root {
+  --primary: #1b5e20;
+  --primary-dark: #0f3a13;
+  --secondary: #455a64;
+  --accent: #2e7d32;
+  --background: #f8f9fa;
+  --surface: rgba(255, 255, 255, 0.82);
+  --surface-strong: #ffffff;
+  --text: #243238;
+  --muted: #5f6f77;
+  --border: rgba(69, 90, 100, 0.14);
+  --radius-lg: 24px;
+  --radius-md: 18px;
+  --radius-round: 999px;
+  --shadow-soft: 0 20px 45px rgba(15, 23, 42, 0.08);
+  --shadow-md: 0 18px 48px rgba(15, 23, 42, 0.14);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  color: var(--text);
+  font-family: 'Manrope', sans-serif;
+  background:
+    radial-gradient(circle at top left, rgba(46, 125, 50, 0.14), transparent 28%),
+    radial-gradient(circle at top right, rgba(69, 90, 100, 0.14), transparent 30%),
+    linear-gradient(180deg, #ffffff 0%, #f8f9fa 46%, #eef2f1 100%);
+}
+
+#root {
+  min-height: 100vh;
+}
+
+a {
+  color: inherit;
+}
+
+.elderly-button {
+  background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+  color: white;
+  border: none;
+  border-radius: var(--radius-round);
+  padding: 16px 26px;
+  font-size: 1rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  box-shadow: var(--shadow-md);
+  transition: transform 220ms ease, box-shadow 220ms ease, opacity 220ms ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.elderly-button:hover {
+  opacity: 0.96;
+  transform: translateY(-3px);
+  box-shadow: 0 20px 44px rgba(47, 111, 237, 0.22);
+}
+
+.elderly-button.secondary {
+  background: linear-gradient(135deg, #ffb55a 0%, var(--accent) 100%);
+}
+
+.glass-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-soft);
+  backdrop-filter: blur(18px);
+}
+
+.premium-mesh {
+  position: relative;
+}
+
+.premium-mesh::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(120deg, rgba(255,255,255,0.22), transparent 30%),
+    radial-gradient(circle at 20% 20%, rgba(255,255,255,0.34), transparent 24%),
+    linear-gradient(180deg, rgba(255,255,255,0.06), transparent 55%);
+  pointer-events: none;
+}
+
+.floating-orb {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(12px);
+  opacity: 0.6;
+  animation: floatOrb 10s ease-in-out infinite;
+}
+
+.soft-grid {
+  position: relative;
+}
+
+.soft-grid::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(69, 90, 100, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(69, 90, 100, 0.045) 1px, transparent 1px);
+  background-size: 22px 22px;
+  mask-image: linear-gradient(180deg, rgba(0,0,0,0.22), transparent 82%);
+  pointer-events: none;
+}
+
+@keyframes fadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(22px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes floatOrb {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(0, -18px, 0) scale(1.06);
+  }
+}
+
+/* --- RESPONSIVIDADE (MOBILE-FIRST) --- */
+
+@media (max-width: 768px) {
+  :root {
+    --radius-lg: 18px;
+    --radius-md: 14px;
+  }
+
+  body {
+    background: linear-gradient(180deg, #ffffff 0%, #f8f9fa 100%);
+  }
+
+  .elderly-button {
+    width: 100%;
+    padding: 14px 20px;
+    font-size: 0.95rem;
+  }
+
+  .glass-card {
+    backdrop-filter: blur(8px);
+    padding: 16px !important;
+  }
+
+  /* Ajustes gerais de espaçamento Mui */
+  .MuiGrid-container {
+    width: 100% !important;
+    margin: 0 !important;
+  }
+  
+  .MuiGrid-item {
+    padding-left: 8px !important;
+    padding-right: 8px !important;
+  }
+
+  h4, .MuiTypography-h4 {
+    font-size: 1.5rem !important;
+  }
+
+  h5, .MuiTypography-h5 {
+    font-size: 1.25rem !important;
+  }
+}
+
+@media (max-width: 480px) {
+  .MuiBox-root {
+    padding-left: 12px !important;
+    padding-right: 12px !important;
+  }
+
+  .elderly-button {
+    font-size: 0.9rem;
+    border-radius: 12px;
+  }
+
+  /* Ajuste para cabeçalhos e textos */
+  .MuiTypography-root {
+    word-break: break-word;
+  }
+
+  /* Reduzir sombras pesadas em mobile para performance */
+  :root {
+    --shadow-soft: 0 8px 24px rgba(15, 23, 42, 0.06);
+    --shadow-md: 0 10px 30px rgba(15, 23, 42, 0.1);
+  }
+}

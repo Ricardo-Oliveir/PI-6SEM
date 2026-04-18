@@ -1,0 +1,15 @@
+# Ignora as pastas de dependências em qualquer lugar do projeto
+node_modules/
+vivamaisdesktop/node_modules/
+functions/node_modules/
+
+# Ignora pastas de build e cache
+build/
+dist/
+.firebase/
+.gcloud/
+
+# Ignora arquivos de ambiente
+.env
+.env.development
+.env.local
