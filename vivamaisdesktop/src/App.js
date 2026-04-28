@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { ThemeProvider, createTheme } from '@mui/material';
 import AdminLayout from './components/AdminLayout';
@@ -10,7 +10,8 @@ import LoginPage from './components/LoginPage';
 import UserLayout from './components/UserLayout';
 import UserDashboardPage from './components/UserDashboardPage';
 import AnswerQuestionnairePage from './components/AnswerQuestionnairePage';
-import { loadModels } from './services/faceRecognition';
+import PublicTVDashboard from './components/PublicTVDashboard';
+// import { loadModels } from './services/faceRecognition';
 
 
 
@@ -59,6 +60,9 @@ function App() {
                         <Route path="user-dashboard" element={<UserDashboardPage />} />
                         <Route path="responder/questionario/:id" element={<AnswerQuestionnairePage />} />
                     </Route>
+
+                    {/* PUBLIC ROUTES */}
+                    <Route path="/tv" element={<PublicTVDashboard />} />
 
                     <Route path="*" element={<Navigate to="/" />} />
                 </Routes>

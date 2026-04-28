@@ -1,8 +1,4 @@
-// API Backend para o aplicativo VivaMais usando Firebase Firestore
-// Este é um exemplo completo de como criar a API que o app React Native irá consumir
-
-// Dependências necessárias:
-// npm install express firebase-admin cors helmet bcryptjs jsonwebtoken dotenv
+// API Backend - Vida Mais (Firebase Firestore)
 
 const express = require('express');
 const admin = require('firebase-admin');
@@ -11,6 +7,7 @@ const helmet = require('helmet');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 require('dotenv').config();
+const { FieldValue } = require('firebase-admin/firestore');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -136,11 +133,11 @@ const authenticateToken = (req, res, next) => {
     return res.status(401).json({ error: 'Token de acesso requerido' });
   }
 
-  jwt.verify(token, process.env.JWT_SECRET || 'vivamais-secret-key', (err, user) => {
+  jwt.verify(token, process.env.JWT_SECRET || 'vidamais-secret-key', (err, user) => {
     if (err) {
       console.log('❌ Erro na verificação do JWT:', err.message);
       console.log('🔐 Token completo:', token);
-      console.log('🔐 JWT_SECRET usado:', process.env.JWT_SECRET || 'vivamais-secret-key');
+      console.log('🔐 JWT_SECRET usado:', process.env.JWT_SECRET || 'vidamais-secret-key');
       return res.status(403).json({ error: 'Token inválido', details: err.message });
     }
     
@@ -148,6 +145,60 @@ const authenticateToken = (req, res, next) => {
     req.user = user;
     next();
   });
+};
+
+// Helper: Calcular distância euclidiana entre dois descritores faciais
+const getFaceDistance = (desc1, desc2) => {
+    if (!desc1 || !desc2) return 1.0;
+    
+    // Converter objetos/arrays para arrays de números se necessário
+    const v1 = Array.isArray(desc1) ? desc1 : Object.values(desc1);
+    const v2 = Array.isArray(desc2) ? desc2 : Object.values(desc2);
+    
+    if (v1.length !== v2.length) return 1.0;
+    
+    let sum = 0;
+    for (let i = 0; i < v1.length; i++) {
+        sum += Math.pow(Number(v1[i]) - Number(v2[i]), 2);
+    }
+    return Math.sqrt(sum);
+};
+
+// Helper: Aplicar lógica de lotes (K-Anonymity)
+// Retorna apenas as sessões que fazem parte de um lote completo (múltiplo de 5) por questionário
+const getReleasedSessions = (allSessions, batchSize = 5) => {
+    if (!allSessions || allSessions.length === 0) return [];
+
+    // Agrupar sessões por questionário
+    const sessionsByQuest = {};
+    allSessions.forEach(s => {
+        const qId = s.questionnaire_id;
+        if (!sessionsByQuest[qId]) sessionsByQuest[qId] = [];
+        sessionsByQuest[qId].push(s);
+    });
+
+    let releasedSessions = [];
+    let pendingSessionIds = new Set();
+
+    Object.keys(sessionsByQuest).forEach(qId => {
+        const sessions = sessionsByQuest[qId];
+        // Ordenar por data de criação para garantir que os primeiros a responder sejam os primeiros liberados
+        sessions.sort((a, b) => {
+            const dateA = a.created_at?.toDate?.() || new Date(a.created_at || 0);
+            const dateB = b.created_at?.toDate?.() || new Date(b.created_at || 0);
+            return dateA - dateB;
+        });
+
+        const total = sessions.length;
+        const releasedCount = Math.floor(total / batchSize) * batchSize;
+        
+        releasedSessions = releasedSessions.concat(sessions.slice(0, releasedCount));
+        
+        // Marcar os IDs das sessões que ainda não foram liberadas
+        sessions.slice(releasedCount).forEach(s => pendingSessionIds.add(s.id));
+    });
+
+    return { releasedSessions, pendingSessionIds };
 };
 
 // ROTAS
@@ -199,11 +250,11 @@ app.post('/api/init-database', async (req, res) => {
       await db.collection('users').add({
         username: 'admin',
         full_name: 'Administrador',
-        email: 'admin@vivamais.com',
+        email: 'admin@vidamais.com',
         password_hash,
         role: 'admin',
-        created_at: admin.firestore.FieldValue.serverTimestamp(),
-        updated_at: admin.firestore.FieldValue.serverTimestamp(),
+        created_at: FieldValue.serverTimestamp(),
+        updated_at: FieldValue.serverTimestamp(),
         is_active: true
       });
       
@@ -224,8 +275,8 @@ app.post('/api/init-database', async (req, res) => {
       const questionnaire1Ref = await db.collection('questionnaires').add({
         title: 'Pesquisa de Satisfação - Serviços para Idosos',
         description: 'Avalie a qualidade dos serviços oferecidos para a terceira idade em nossa comunidade',
-        created_at: admin.firestore.FieldValue.serverTimestamp(),
-        updated_at: admin.firestore.FieldValue.serverTimestamp(),
+        created_at: FieldValue.serverTimestamp(),
+        updated_at: FieldValue.serverTimestamp(),
         is_active: true
       });
       
@@ -258,7 +309,7 @@ app.post('/api/init-database', async (req, res) => {
         await db.collection('questions').add({
           ...question,
           questionnaire_id: questionnaire1Ref.id,
-          created_at: admin.firestore.FieldValue.serverTimestamp()
+          created_at: FieldValue.serverTimestamp()
         });
       }
       
@@ -266,8 +317,8 @@ app.post('/api/init-database', async (req, res) => {
       const questionnaire2Ref = await db.collection('questionnaires').add({
         title: 'Avaliação de Acessibilidade',
         description: 'Como podemos melhorar a acessibilidade dos nossos serviços?',
-        created_at: admin.firestore.FieldValue.serverTimestamp(),
-        updated_at: admin.firestore.FieldValue.serverTimestamp(),
+        created_at: FieldValue.serverTimestamp(),
+        updated_at: FieldValue.serverTimestamp(),
         is_active: true
       });
       
@@ -293,7 +344,7 @@ app.post('/api/init-database', async (req, res) => {
         await db.collection('questions').add({
           ...question,
           questionnaire_id: questionnaire2Ref.id,
-          created_at: admin.firestore.FieldValue.serverTimestamp()
+          created_at: FieldValue.serverTimestamp()
         });
       }
       
@@ -391,7 +442,7 @@ app.post('/api/migrate-to-embedded', async (req, res) => {
       // 3. Atualizar questionário com questões embedded
       await db.collection('questionnaires').doc(questionnaireId).update({
         questions: embeddedQuestions,
-        updated_at: admin.firestore.FieldValue.serverTimestamp()
+        updated_at: FieldValue.serverTimestamp()
       });
       
       console.log(`✅ Questionário ${questionnaireData.title} migrado com ${embeddedQuestions.length} questões`);
@@ -415,96 +466,56 @@ app.post('/api/migrate-to-embedded', async (req, res) => {
   }
 });
 
-// Network Test - Para debug React Native
-app.get('/api/network-test', (req, res) => {
-  res.json({
-    message: '✅ Conexão entre React Native e servidor funcionando!',
-    timestamp: new Date().toISOString(),
-    clientIP: req.ip || req.connection.remoteAddress,
-    userAgent: req.get('User-Agent'),
-    origin: req.get('Origin'),
-    headers: {
-      'content-type': req.get('Content-Type'),
-      'authorization': req.get('Authorization') ? 'Present' : 'Not present'
-    }
-  });
-});
-
-// Teste do banco - Para verificar se o Firestore está funcionando
-app.get('/api/database-test', async (req, res) => {
+app.get('/api/questionnaires', async (req, res) => {
   try {
-    console.log('🧪 Testando Firestore...');
-    
-    const tests = {};
+    const [qSnapshot, uSnapshot, sSnapshot] = await Promise.all([
+      db.collection('questionnaires').get(),
+      db.collection('users').get(),
+      db.collection('response_sessions').get()
+    ]);
 
-    // Teste 1: Verificar coleções
-    const collections = ['users', 'questionnaires', 'questions', 'responses'];
-    tests.collections = {};
+    const totalUsers = uSnapshot.size || 1; // Evita divisão por zero
+    const sessions = sSnapshot.docs.map(doc => doc.data());
     
-    for (const collectionName of collections) {
-      try {
-        const snapshot = await db.collection(collectionName).limit(1).get();
-        tests.collections[collectionName] = {
-          exists: true,
-          documentCount: snapshot.size
-        };
-      } catch (err) {
-        tests.collections[collectionName] = {
-          exists: false,
-          error: err.message
-        };
-      }
-    }
-
-    // Teste 2: Verificar usuário admin
-    try {
-      const adminSnapshot = await db.collection('users')
-        .where('username', '==', 'admin')
-        .limit(1)
-        .get();
+    const questionnaires = qSnapshot.docs.map(doc => {
+      const qData = doc.data();
+      const qId = doc.id;
       
-      if (!adminSnapshot.empty) {
-        const adminDoc = adminSnapshot.docs[0];
-        tests.adminUser = {
-          id: adminDoc.id,
-          ...adminDoc.data(),
-          password_hash: '[HIDDEN]' // Não expor o hash da senha
-        };
-      } else {
-        tests.adminUser = null;
-      }
-    } catch (err) {
-      tests.adminUser = { error: err.message };
-    }
+      // Contar usuários únicos que responderam este questionário específico
+      const uniqueRespondents = new Set(
+        sessions
+          .filter(s => s.questionnaire_id === qId && s.user_id)
+          .map(s => s.user_id)
+      ).size;
 
-    // Teste 3: Contar documentos em cada coleção
-    tests.counts = {};
-    for (const collectionName of collections) {
-      try {
-        const snapshot = await db.collection(collectionName).get();
-        tests.counts[collectionName] = snapshot.size;
-      } catch (err) {
-        tests.counts[collectionName] = `Error: ${err.message}`;
-      }
-    }
+      // Cálculo Real de Engajamento
+      const engagementRate = Math.round((uniqueRespondents / totalUsers) * 100);
 
-    res.json({
-      success: true,
-      message: 'Testes do Firebase Firestore executados com sucesso',
-      tests,
-      timestamp: new Date().toISOString()
+      // Tratamento de Data para evitar "Invalid Date"
+      let createdAtIso = null;
+      if (qData.created_at) {
+        createdAtIso = typeof qData.created_at.toDate === 'function' 
+          ? qData.created_at.toDate().toISOString() 
+          : new Date(qData.created_at).toISOString();
+      }
+
+      return { 
+        id: qId, 
+        ...qData,
+        created_at: createdAtIso, // Sobrescreve com formato ISO amigável
+        engagement_rate: engagementRate,
+        respondents_count: uniqueRespondents,
+        total_users_snapshot: totalUsers
+      };
     });
-
+    
+    res.json(questionnaires);
   } catch (error) {
-    console.error('❌ Erro nos testes do banco:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Erro ao executar testes do banco',
-      details: error.message,
-      timestamp: new Date().toISOString()
-    });
+    console.error('Erro ao listar questionários:', error);
+    res.status(500).json({ error: 'Erro interno ao buscar dados' });
   }
 });
+
 
 // === ROTAS DE AUTENTICAÇÃO ===
 
@@ -546,7 +557,7 @@ app.post('/api/auth/login-biometric', async (req, res) => {
     // Gerar JWT real
     const token = jwt.sign(
       { id: userDoc.id, username: userData.username, role: userData.role || 'user' },
-      process.env.JWT_SECRET || 'vivamais-secret-key',
+      process.env.JWT_SECRET || 'vidamais-secret-key',
       { expiresIn: '24h' }
     );
 
@@ -612,7 +623,7 @@ app.post('/api/auth/login', async (req, res) => {
         username: userData.username,
         role: userData.role 
       },
-      process.env.JWT_SECRET || 'vivamais-secret-key',
+      process.env.JWT_SECRET || 'vidamais-secret-key',
       { expiresIn: '24h' }
     );
 
@@ -672,6 +683,28 @@ app.post('/api/auth/register', async (req, res) => {
       return res.status(400).json({ error: 'Email já existe' });
     }
 
+    // Verificar duplicidade biométrica
+    if (face_descriptor) {
+      const allUsersSnap = await db.collection('users').get();
+      let biometricMatch = null;
+      
+      allUsersSnap.forEach(doc => {
+          const u = doc.data();
+          if (u.face_descriptor) {
+              const dist = getFaceDistance(face_descriptor, u.face_descriptor);
+              if (dist < 0.45) {
+                  biometricMatch = u.full_name;
+              }
+          }
+      });
+
+      if (biometricMatch) {
+          return res.status(400).json({ 
+              error: `BLOQUEIO BIOMÉTRICO: Esta biometria já pertence a ${biometricMatch}.` 
+          });
+      }
+    }
+
     // Verificar se FULL NAME já existe (Evitar duplicidade de pessoas)
     const nameSnapshot = await db.collection('users')
       .where('full_name', '==', full_name)
@@ -692,8 +725,8 @@ app.post('/api/auth/register', async (req, res) => {
       email,
       password_hash,
       role,
-      created_at: admin.firestore.FieldValue.serverTimestamp(),
-      updated_at: admin.firestore.FieldValue.serverTimestamp(),
+      created_at: FieldValue.serverTimestamp(),
+      updated_at: FieldValue.serverTimestamp(),
       is_active: true
     };
     
@@ -780,7 +813,7 @@ app.delete('/api/users/:id', authenticateToken, async (req, res) => {
 app.put('/api/users/:id', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
-    const { full_name, email, phone, address, role, username, face_photo, face_descriptor } = req.body;
+    const { full_name, email, phone, address, role, username, face_photo, face_descriptor, password } = req.body;
     
     console.log(`✏️ Atualizando usuário ID: ${id}`);
     
@@ -791,10 +824,34 @@ app.put('/api/users/:id', authenticateToken, async (req, res) => {
     if (!doc.exists) {
       return res.status(404).json({ error: 'Usuário não encontrado' });
     }
+
+    // Verificar duplicidade biométrica (se estiver alterando a foto)
+    if (face_descriptor) {
+        const allUsersSnap = await db.collection('users').get();
+        let biometricMatch = null;
+        
+        allUsersSnap.forEach(userDoc => {
+            if (userDoc.id === id) return; // Ignorar o próprio usuário
+            
+            const u = userDoc.data();
+            if (u.face_descriptor) {
+                const dist = getFaceDistance(face_descriptor, u.face_descriptor);
+                if (dist < 0.45) {
+                    biometricMatch = u.full_name;
+                }
+            }
+        });
+
+        if (biometricMatch) {
+            return res.status(400).json({ 
+                error: `BLOQUEIO BIOMÉTRICO: Esta biometria já pertence a ${biometricMatch}.` 
+            });
+        }
+    }
     
     // Preparar objeto de update com os campos que vieram no body
     const updates = {
-      updated_at: admin.firestore.FieldValue.serverTimestamp()
+      updated_at: FieldValue.serverTimestamp()
     };
     
     if (full_name !== undefined) updates.full_name = full_name;
@@ -805,6 +862,12 @@ app.put('/api/users/:id', authenticateToken, async (req, res) => {
     if (username !== undefined) updates.username = username;
     if (face_photo !== undefined) updates.face_photo = face_photo;
     if (face_descriptor !== undefined) updates.face_descriptor = face_descriptor;
+    
+    // Se houver nova senha, criptografar antes de salvar
+    if (password && password.length >= 6) {
+      console.log('🔐 Atualizando senha do usuário...');
+      updates.password_hash = await bcrypt.hash(password, 12);
+    }
     
     await docRef.update(updates);
     
@@ -1022,8 +1085,8 @@ app.post('/api/questionnaires', authenticateToken, async (req, res) => {
       title,
       description: description || '',
       created_by: req.user.id,
-      created_at: admin.firestore.FieldValue.serverTimestamp(),
-      updated_at: admin.firestore.FieldValue.serverTimestamp(),
+      created_at: FieldValue.serverTimestamp(),
+      updated_at: FieldValue.serverTimestamp(),
       status: 'draft', // Todo novo questionário começa como rascunho
       questions: processedQuestions  // 🔥 QUESTÕES EMBEDDED
     };
@@ -1061,7 +1124,7 @@ app.patch('/api/questionnaires/:id/status', authenticateToken, async (req, res) 
       status,
       // Legado: is_active mantém compatibilidade com versões antigas
       is_active: status === 'active',
-      updated_at: admin.firestore.FieldValue.serverTimestamp()
+      updated_at: FieldValue.serverTimestamp()
     };
 
     await db.collection('questionnaires').doc(id).update(updates);
@@ -1088,7 +1151,7 @@ app.put('/api/questionnaires/:id', authenticateToken, async (req, res) => {
     const updates = {
       title,
       description: description || '',
-      updated_at: admin.firestore.FieldValue.serverTimestamp()
+      updated_at: FieldValue.serverTimestamp()
     };
 
     await db.collection('questionnaires').doc(id).update(updates);
@@ -1120,7 +1183,7 @@ app.delete('/api/questionnaires/:id', authenticateToken, async (req, res) => {
     await db.collection('questionnaires').doc(id).update({
       status: 'finished', // Deletar agora move para concluído/arquivado
       is_active: false,   // Legado funcional
-      updated_at: admin.firestore.FieldValue.serverTimestamp()
+      updated_at: FieldValue.serverTimestamp()
     });
 
     console.log(`✅ Questionário deletado: ${id}`);
@@ -1266,7 +1329,7 @@ app.post('/api/questionnaires/:id/questions', authenticateToken, async (req, res
     // Atualizar o documento
     await questionnaireRef.update({
       questions: updatedQuestions,
-      updated_at: admin.firestore.FieldValue.serverTimestamp()
+      updated_at: FieldValue.serverTimestamp()
     });
 
     console.log(`✅ Questão adicionada: ${questionId}`);
@@ -1319,7 +1382,7 @@ app.put('/api/questionnaires/:questionnaireId/questions/:questionId', authentica
     // Atualizar o documento
     await questionnaireRef.update({
       questions: questions,
-      updated_at: admin.firestore.FieldValue.serverTimestamp()
+      updated_at: FieldValue.serverTimestamp()
     });
 
     console.log(`✅ Questão atualizada: ${questionId}`);
@@ -1363,7 +1426,7 @@ app.delete('/api/questionnaires/:questionnaireId/questions/:questionId', authent
     // Atualizar o documento
     await questionnaireRef.update({
       questions: updatedQuestions,
-      updated_at: admin.firestore.FieldValue.serverTimestamp()
+      updated_at: FieldValue.serverTimestamp()
     });
 
     console.log(`✅ Questão deletada: ${questionId}`);
@@ -1402,7 +1465,7 @@ app.post('/api/responses/session', authenticateToken, async (req, res) => {
       respondent_name,
       respondent_age: respondent_age || null,
       user_id: finalUserId,
-      created_at: admin.firestore.FieldValue.serverTimestamp(),
+      created_at: FieldValue.serverTimestamp(),
       completed_at: null
     };
 
@@ -1441,7 +1504,7 @@ app.post('/api/responses', authenticateToken, async (req, res) => {
       value: typeof value === 'string' ? value : JSON.stringify(value),
       numeric_value: numeric_value,
       session_id: session_id,
-      created_at: admin.firestore.FieldValue.serverTimestamp()
+      created_at: FieldValue.serverTimestamp()
     };
 
     const docRef = await db.collection('responses').add(newResponse);
@@ -1489,7 +1552,7 @@ app.post('/api/responses/batch', authenticateToken, async (req, res) => {
         value: typeof value === 'string' ? value : JSON.stringify(value),
         numeric_value: numeric_value,
         session_id: session_id,
-        created_at: admin.firestore.FieldValue.serverTimestamp()
+        created_at: FieldValue.serverTimestamp()
       });
       
       savedIds.push(docRef.id);
@@ -1571,33 +1634,47 @@ app.get('/api/questionnaires/:id/responses', authenticateToken, async (req, res)
     if (!questionnaireDoc.exists) {
       return res.status(404).json({ error: 'Questionário não encontrado' });
     }
-
     const qData = questionnaireDoc.data();
+    
+    // Buscar todas as sessões deste questionário
+    const sessionsSnap = await db.collection('response_sessions')
+        .where('questionnaire_id', '==', id)
+        .get();
+        
+    const allSessions = sessionsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    
+    // Aplicar lotes (BATCH_SIZE = 5)
+    const { releasedSessions } = getReleasedSessions(allSessions, 5);
+    const releasedSessionIds = new Set(releasedSessions.map(s => s.id));
+
     const questionIds = (qData.questions || []).map(q => q.id);
 
-    if (questionIds.length === 0) {
+    if (questionIds.length === 0 || releasedSessionIds.size === 0) {
       return res.json([]);
     }
 
-    // Buscar respostas para essas questões
+    // Buscar respostas apenas para as sessões liberadas
     const responses = [];
     
     // Firestore tem limite de 10 itens em consultas 'in', então fazemos em lotes
     const batchSize = 10;
     for (let i = 0; i < questionIds.length; i += batchSize) {
-      const batch = questionIds.slice(i, i + batchSize);
+      const qBatch = questionIds.slice(i, i + batchSize);
       
       const snapshot = await db.collection('responses')
-        .where('question_id', 'in', batch)
+        .where('question_id', 'in', qBatch)
         .get();
 
       snapshot.forEach(doc => {
         const data = doc.data();
-        responses.push({
-          id: doc.id,
-          ...data,
-          created_at: data.created_at?.toDate?.()?.toISOString() || data.created_at
-        });
+        // Filtrar apenas respostas de sessões liberadas
+        if (releasedSessionIds.has(data.session_id)) {
+            responses.push({
+                id: doc.id,
+                ...data,
+                created_at: data.created_at?.toDate?.()?.toISOString() || data.created_at
+            });
+        }
       });
     }
 
@@ -1678,9 +1755,16 @@ app.get('/api/questionnaires/:id/statistics', authenticateToken, async (req, res
     const questionnaireData = questionnaireDoc.data();
     const questions = questionnaireData.questions || [];
     
-    // Contar respostas para este questionário
-    // Como as questões agora são embedded, precisamos buscar respostas por question_id
-    let totalResponses = 0;
+    // Buscar sessões e aplicar lotes
+    const sessionsSnap = await db.collection('response_sessions')
+        .where('questionnaire_id', '==', id)
+        .get();
+    const allSessions = sessionsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    const { releasedSessions } = getReleasedSessions(allSessions, 5);
+    const releasedSessionIds = new Set(releasedSessions.map(s => s.id));
+
+    // Contar respostas para este questionário (apenas de sessões liberadas)
+    let totalResponsesCount = 0;
     const questionStats = [];
     
     for (const question of questions) {
@@ -1688,25 +1772,48 @@ app.get('/api/questionnaires/:id/statistics', authenticateToken, async (req, res
         .where('question_id', '==', question.id)
         .get();
       
-      const questionResponseCount = responsesSnapshot.size;
-      totalResponses += questionResponseCount;
+      const releasedResponses = responsesSnapshot.docs.filter(doc => releasedSessionIds.has(doc.data().session_id));
+      const count = releasedResponses.length;
+      totalResponsesCount += count;
       
       questionStats.push({
         questionId: question.id,
         questionText: question.text,
         type: question.type,
-        responses: questionResponseCount
+        responses: count
       });
     }
+
+    // 4. Identificar Usuários Pendentes para este questionário
+    const usersSnap = await db.collection('users').get();
+    const allRespondentIds = new Set(allSessions.map(s => String(s.user_id)));
+    const releasedRespondentIds = new Set(releasedSessions.map(s => String(s.user_id)));
+    
+    const pendingUsers = [];
+    usersSnap.forEach(doc => {
+        const u = doc.data();
+        // Usuário é pendente se não respondeu OU se respondeu mas não foi liberado
+        if (u.role !== 'admin' && !releasedRespondentIds.has(String(doc.id))) {
+            pendingUsers.push({
+                id: doc.id,
+                full_name: u.full_name,
+                username: u.username,
+                has_responded: allRespondentIds.has(String(doc.id)) // Útil para saber se está só aguardando lote
+            });
+        }
+    });
 
     const statistics = {
       questionnaireId: id,
       title: questionnaireData.title,
       totalQuestions: questions.length,
-      totalResponses,
-      averageResponsesPerQuestion: questions.length > 0 ? Math.round(totalResponses / questions.length) : 0,
-      completionRate: questions.length > 0 ? Math.round((totalResponses / questions.length) * 100) : 0,
-      questionStats
+      totalResponses: totalResponsesCount,
+      averageResponsesPerQuestion: questions.length > 0 ? Math.round(totalResponsesCount / questions.length) : 0,
+      completionRate: questions.length > 0 ? Math.round((totalResponsesCount / questions.length) * 100) : 0,
+      questionStats,
+      pendingUsers,
+      batchSize: 5,
+      isBatchRelease: true
     };
 
     console.log(`✅ Estatísticas geradas para questionário ${id}`);
@@ -1718,42 +1825,6 @@ app.get('/api/questionnaires/:id/statistics', authenticateToken, async (req, res
   }
 });
 
-app.get('/api/statistics', authenticateToken, async (req, res) => {
-  try {
-    console.log('📊 Calculando estatísticas...');
-    
-    // Conta documentos nas coleções
-    const usersSnap = await db.collection('users').get();
-    const questsSnap = await db.collection('questionnaires').get();
-    
-    // Para respostas, precisamos contar todas (pode ser pesado se tiver milhares, mas serve por agora)
-    // Se você tiver uma coleção 'responses' separada:
-    const respSnap = await db.collection('responses').get();
-    // OU se as respostas ficam dentro de sessões, conte as sessões:
-    // const respSnap = await db.collection('response_sessions').get(); 
-
-    // Filtra questionários ativos
-    let activeQuests = 0;
-    questsSnap.forEach(doc => {
-        const d = doc.data();
-        const stat = d.status || (d.is_active === false ? 'finished' : 'active');
-        if (stat === 'active') activeQuests++;
-    });
-
-    const stats = {
-      totalUsers: usersSnap.size,
-      totalQuestionnaires: activeQuests,
-      totalResponses: respSnap.size // Ou 0 se não tiver respostas ainda
-    };
-
-    console.log('✅ Estatísticas:', stats);
-    res.json(stats);
-
-  } catch (error) {
-    console.error('❌ Erro stats:', error);
-    res.status(500).json({ error: 'Erro ao buscar estatísticas' });
-  }
-});
 
 // Estatísticas específicas de uma questão
 app.get('/api/questions/:questionId/statistics', authenticateToken, async (req, res) => {
@@ -1818,81 +1889,6 @@ app.get('/api/questions/:questionId/statistics', authenticateToken, async (req, 
   }
 });
 
-// Debug: Listar todas as respostas (apenas para desenvolvimento)
-app.get('/api/debug/responses', authenticateToken, async (req, res) => {
-  try {
-    console.log('🔍 DEBUG: Listando todas as respostas no banco...');
-    
-    const responsesSnapshot = await db.collection('responses').get();
-    console.log(`🔍 Total de documentos na collection 'responses': ${responsesSnapshot.size}`);
-    
-    const responses = [];
-    responsesSnapshot.forEach(doc => {
-      const data = doc.data();
-      responses.push({
-        id: doc.id,
-        question_id: data.question_id,
-        user_id: data.user_id,
-        value: data.value,
-        numeric_value: data.numeric_value,
-        session_id: data.session_id,
-        created_at: data.created_at?.toDate?.()?.toISOString() || data.created_at
-      });
-    });
-    
-    console.log('🔍 Respostas encontradas:', responses.length);
-    responses.forEach((resp, index) => {
-      console.log(`🔍 Resposta ${index + 1}:`, resp);
-    });
-    
-    res.json({
-      total: responses.length,
-      responses: responses
-    });
-    
-  } catch (error) {
-    console.error('❌ Erro no debug das respostas:', error);
-    res.status(500).json({ error: 'Erro interno do servidor' });
-  }
-});
-
-// Debug: Listar todas as sessões (apenas para desenvolvimento)
-app.get('/api/debug/sessions', authenticateToken, async (req, res) => {
-  try {
-    console.log('🔍 DEBUG: Listando todas as sessões no banco...');
-    
-    const sessionsSnapshot = await db.collection('response_sessions').get();
-    console.log(`🔍 Total de documentos na collection 'response_sessions': ${sessionsSnapshot.size}`);
-    
-    const sessions = [];
-    sessionsSnapshot.forEach(doc => {
-      const data = doc.data();
-      sessions.push({
-        id: doc.id,
-        questionnaire_id: data.questionnaire_id,
-        user_id: data.user_id,
-        respondent_name: data.respondent_name,
-        respondent_age: data.respondent_age,
-        created_at: data.created_at?.toDate?.()?.toISOString() || data.created_at,
-        completed_at: data.completed_at?.toDate?.()?.toISOString() || data.completed_at
-      });
-    });
-    
-    console.log('🔍 Sessões encontradas:', sessions.length);
-    sessions.forEach((session, index) => {
-      console.log(`🔍 Sessão ${index + 1}:`, session);
-    });
-    
-    res.json({
-      total: sessions.length,
-      sessions: sessions
-    });
-    
-  } catch (error) {
-    console.error('❌ Erro no debug das sessões:', error);
-    res.status(500).json({ error: 'Erro interno do servidor' });
-  }
-});
 
 // Dashboard com estatísticas gerais
 app.get('/api/statistics', authenticateToken, async (req, res) => {
@@ -1917,7 +1913,6 @@ app.get('/api/statistics', authenticateToken, async (req, res) => {
        if (stat === 'active') activeQuests++;
     });
     stats.totalQuestionnaires = activeQuests;
-    stats.totalQuestionnaires = questionnairesSnapshot.size;
 
     // Contar questões
     const questionsSnapshot = await db.collection('questions').get();
@@ -1996,40 +1991,119 @@ app.get('/api/dashboard-data', authenticateToken, async (req, res) => {
         if (data.is_active !== false && data.status !== 'finished') activeQuests++;
     });
 
-    // 2. Buscar Sessões de Resposta e Filtrar
-    const monthlyCounts = new Array(12).fill(0);
-    const sessionsSnap = await db.collection('response_sessions').get();
-    let responsesInPeriod = 0;
-    let filteredSessionIds = new Set();
+    // 2. Buscar Sessões de Resposta e Aplicar Lotes
+    const [sessionsSnap, usersFullSnap] = await Promise.all([
+        db.collection('response_sessions').get(),
+        db.collection('users').get()
+    ]);
+    
+    // Mapeamento de IDs e Usernames para garantir que encontremos o nome
+    const userNamesMap = {};
+    const userNameToFullName = {};
+    
+    usersFullSnap.forEach(doc => {
+        const uData = doc.data();
+        const uid = String(doc.id);
+        userNamesMap[uid] = uData.full_name;
+        if (uData.username) {
+            userNameToFullName[String(uData.username).toLowerCase()] = uData.full_name;
+        }
+    });
 
-    sessionsSnap.forEach(doc => {
-        const data = doc.data();
-        if (data.created_at) {
-            const date = data.created_at.toDate();
+    const allSessions = sessionsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    
+    // BATCH SIZE = 5
+    const { releasedSessions, pendingSessionIds } = getReleasedSessions(allSessions, 5);
+    
+    const monthlyCounts = new Array(12).fill(0);
+    const monthlyQuestionnaireCounts = new Array(12).fill(0);
+    
+    let dailyCounts = [];
+    let dailyQuestionnaireCounts = [];
+    if (targetMonth !== -1) {
+        const daysInMonth = new Date(targetYear, targetMonth + 1, 0).getDate();
+        dailyCounts = new Array(daysInMonth).fill(0);
+        dailyQuestionnaireCounts = new Array(daysInMonth).fill(0);
+    }
+    
+    // Mapeamento de títulos de questionários
+    const questionnaireTitles = {};
+    questsSnap.forEach(doc => {
+        questionnaireTitles[doc.id] = doc.data().title;
+    });
+
+    let responsesInPeriod = 0;
+    let releasedPeriodSessionIds = new Set();
+    let respondentDetails = []; // { name, questionnaire }
+    let respondentMap = {}; // user_id -> set of questionnaire_ids responded
+
+    releasedSessions.forEach(s => {
+        const uid = s.user_id ? String(s.user_id) : null;
+        if (uid) {
+            if (!respondentMap[uid]) respondentMap[uid] = new Set();
+            respondentMap[uid].add(s.questionnaire_id);
+        }
+
+        if (s.created_at) {
+            const date = s.created_at.toDate();
             if (date.getFullYear() === targetYear) {
                 const sMonth = date.getMonth();
                 monthlyCounts[sMonth]++;
 
-                // Filtro para o total e para as respostas detalhadas
                 if (targetMonth === -1 || sMonth === targetMonth) {
                     responsesInPeriod++;
-                    filteredSessionIds.add(doc.id);
+                    releasedPeriodSessionIds.add(s.id);
+                    
+                    // Tenta encontrar o nome por ID ou por Username (caso gravado errado na sessão)
+                    let realName = userNamesMap[uid];
+                    if (!realName && s.respondent_name && s.respondent_name !== 'Anônimo' && s.respondent_name !== 'Colaborador Anônimo') {
+                        realName = s.respondent_name;
+                    }
+                    
+                    // Fallback para "Participante" se tudo falhar, mas tenta limpar o "Anônimo"
+                    if (!realName || realName === 'Anônimo' || realName === 'Colaborador Anônimo') {
+                        realName = 'Participante';
+                    }
+
+                    respondentDetails.push({
+                        name: realName,
+                        questionnaire: questionnaireTitles[s.questionnaire_id] || 'Questionário Removido'
+                    });
+                    
+                    if (targetMonth !== -1) {
+                        const sDay = date.getDate();
+                        dailyCounts[sDay - 1]++;
+                    }
                 }
             }
         }
     });
 
-    // 3. Calcular Média de Atividade Filtrada por Período
+    // Contagem mensal de questionários criados
+    questsSnap.forEach(doc => {
+        const data = doc.data();
+        if (data.created_at) {
+            const date = data.created_at.toDate();
+            if (date.getFullYear() === targetYear) {
+                const qMonth = date.getMonth();
+                monthlyQuestionnaireCounts[qMonth]++;
+                
+                if (targetMonth !== -1 && qMonth === targetMonth) {
+                    const qDay = date.getDate();
+                    dailyQuestionnaireCounts[qDay - 1]++;
+                }
+            }
+        }
+    });
+
+    // 3. Calcular Média de Atividade (Apenas Liberados)
     let totalScore = 0;
     let scoreCount = 0;
     const responsesSnap = await db.collection('responses').get();
     
     responsesSnap.forEach(doc => {
         const data = doc.data();
-        const sessionId = data.session_id;
-        
-        // Se estamos filtrando por período, só contamos respostas de sessões que passaram no filtro
-        if (filteredSessionIds.has(sessionId)) {
+        if (releasedPeriodSessionIds.has(data.session_id)) {
             if (data.numeric_value !== null && data.numeric_value !== undefined) {
                 totalScore += Number(data.numeric_value);
                 scoreCount++;
@@ -2039,15 +2113,64 @@ app.get('/api/dashboard-data', authenticateToken, async (req, res) => {
 
     const activity = scoreCount > 0 ? (totalScore / scoreCount).toFixed(1) : "0.0";
 
+    // 4. Identificar Usuários Pendentes por Questionário
+    const pendingDetails = [];
+    const activeQuestionnaires = [];
+    questsSnap.forEach(doc => {
+        const data = doc.data();
+        if (data.is_active !== false && data.status !== 'finished') {
+            activeQuestionnaires.push({ id: doc.id, title: data.title });
+        }
+    });
+
+    usersSnap.forEach(doc => {
+        const u = doc.data();
+        if (u.role !== 'admin' && u.role !== 'administrator' && u.is_active !== false) {
+            const uid = String(doc.id);
+            const userRespondedTo = respondentMap[uid] || new Set();
+
+            activeQuestionnaires.forEach(q => {
+                if (!userRespondedTo.has(q.id)) {
+                    pendingDetails.push({
+                        id: `${uid}_${q.id}`,
+                        full_name: u.full_name,
+                        username: u.username,
+                        questionnaire: q.title
+                    });
+                }
+            });
+        }
+    });
+
+    // Filtrar Administradores
+    const filteredUsers = [];
+    usersSnap.forEach(doc => {
+        const data = doc.data();
+        if (data.role !== 'admin' && data.role !== 'administrator') {
+            filteredUsers.push({ id: doc.id, ...data });
+        }
+    });
+    const activeUserCount = filteredUsers.length;
+
     const stats = {
-      totalUsers: usersSnap.size,
+      totalUsers: activeUserCount,
       totalQuestionnaires: activeQuests,
       responses: responsesInPeriod,
       activity: activity,
-      monthlyCounts: monthlyCounts
+      engagementRate: (activeUserCount * activeQuests) > 0 
+          ? ((allSessions.length / (activeUserCount * questsSnap.size)) * 100).toFixed(1) 
+          : "0.0",
+      monthlyCounts: monthlyCounts,
+      monthlyQuestionnaireCounts: monthlyQuestionnaireCounts,
+      dailyCounts: dailyCounts,
+      dailyQuestionnaireCounts: dailyQuestionnaireCounts,
+      pendingUsers: pendingDetails,
+      respondents: respondentDetails,
+      batchSize: 5,
+      realTotalResponses: allSessions.length
     };
 
-    console.log('✅ Dados do Dashboard consolidados:', stats);
+    console.log('✅ Dados do Dashboard consolidados (Lote 5):', stats);
     res.json(stats);
 
   } catch (error) {
@@ -2057,167 +2180,123 @@ app.get('/api/dashboard-data', authenticateToken, async (req, res) => {
         totalQuestionnaires: 0, 
         responses: 0, 
         activity: "0.0", 
-        monthlyCounts: new Array(12).fill(0) 
+        monthlyCounts: new Array(12).fill(0),
+        monthlyQuestionnaireCounts: new Array(12).fill(0)
     });
   }
 });
 
-// === INICIALIZAÇÃO DO SERVIDOR ===
-
-// Função para inicializar estruturas do banco
-async function initializeDatabaseStructures() {
-  try {
-    console.log('🔧 Verificando estruturas do banco de dados...');
-    
-    // Verificar se já existe dados
-    const collections = ['users', 'questionnaires', 'questions', 'responses'];
-    
-    // Criar questionários de exemplo se não existirem
-    const questionnaireSnapshot = await db.collection('questionnaires').limit(1).get();
-    
-    if (questionnaireSnapshot.empty) {
-      console.log('📝 Criando questionários de exemplo com estrutura NoSQL embedded...');
-      
-      // Questionário 1 - COM QUESTÕES EMBEDDED
-      await db.collection('questionnaires').add({
-        title: 'Pesquisa de Satisfação - Serviços para Idosos',
-        description: 'Avalie a qualidade dos serviços oferecidos para a terceira idade em nossa comunidade',
-        created_at: admin.firestore.FieldValue.serverTimestamp(),
-        updated_at: admin.firestore.FieldValue.serverTimestamp(),
-        is_active: true,
-        questions: [  // 🔥 QUESTÕES DENTRO DO DOCUMENTO!
-          {
-            id: 'q1',
-            text: 'Como você avalia o atendimento que recebeu?',
-            type: 'rating',
-            options: null,
-            order: 1,
-            is_required: true
-          },
-          {
-            id: 'q2',
-            text: 'Você recomendaria nossos serviços para outros idosos?',
-            type: 'yes_no',
-            options: null,
-            order: 2,
-            is_required: true
-          },
-          {
-            id: 'q3',
-            text: 'Qual aspecto do atendimento você considera mais importante?',
-            type: 'multiple_choice',
-            options: ['Rapidez no atendimento', 'Gentileza dos funcionários', 'Clareza nas informações', 'Ambiente acolhedor', 'Facilidade de acesso'],
-            order: 3,
-            is_required: true
-          }
-        ]
-      });
-      
-      // Questionário 2 - COM QUESTÕES EMBEDDED
-      await db.collection('questionnaires').add({
-        title: 'Avaliação de Acessibilidade',
-        description: 'Como podemos melhorar a acessibilidade dos nossos serviços?',
-        created_at: admin.firestore.FieldValue.serverTimestamp(),
-        updated_at: admin.firestore.FieldValue.serverTimestamp(),
-        is_active: true,
-        questions: [  // 🔥 QUESTÕES DENTRO DO DOCUMENTO!
-          {
-            id: 'q1',
-            text: 'Como você avalia a facilidade de acesso ao nosso local?',
-            type: 'rating',
-            options: null,
-            order: 1,
-            is_required: true
-          },
-          {
-            id: 'q2',
-            text: 'Que melhorias de acessibilidade você sugere?',
-            type: 'text',
-            options: null,
-            order: 2,
-            is_required: false
-          }
-        ]
-      });
-      
-      console.log('✅ Questionários com estrutura NoSQL embedded criados!');
-    } else {
-      console.log('✅ Questionários já existem');
-    }
-  } catch (error) {
-    console.error('❌ Erro ao inicializar estruturas:', error);
-    throw error;
-  }
-}
-
-// Inicializar o servidor
-async function initializeServer() {
-  try {
-    console.log('🚀 Iniciando servidor...');
-    
-    // Criar usuário admin se não existir
-    await createAdminUser();
-    
-    // Inicializar banco de dados automaticamente
-    console.log('🔧 Inicializando estruturas do banco de dados...');
+// VERSÃO PÚBLICA DO DASHBOARD (Sem autenticação)
+app.get('/api/public/dashboard-data', async (req, res) => {
     try {
-      // Simular uma requisição para o endpoint de inicialização
-      await initializeDatabaseStructures();
-    } catch (initError) {
-      console.error('⚠️  Erro ao inicializar banco (continuando):', initError.message);
-    }
-    
-    app.listen(PORT, '0.0.0.0', () => {
-      console.log(`✅ Servidor rodando na porta ${PORT} em todos os interfaces`);
-      console.log(`🌐 Health check (local): http://localhost:${PORT}/api/health`);
-      console.log(`🌐 Health check (Wi-Fi): http://172.20.10.4:${PORT}/api/health`);
-      console.log(`📱 Para React Native: http://172.20.10.4:${PORT}/api/health`);
-      console.log(`🧪 Network test: http://172.20.10.4:${PORT}/api/network-test`);
-      console.log(`🔧 Database test: http://172.20.10.4:${PORT}/api/database-test`);
-    });
-  } catch (error) {
-    console.error('❌ Erro ao inicializar servidor:', error);
-    process.exit(1);
-  }
-}
+        const targetYear = new Date().getFullYear();
+        
+        const [usersSnap, questsSnap, sessionsSnap] = await Promise.all([
+            db.collection('users').get(),
+            db.collection('questionnaires').get(),
+            db.collection('response_sessions').get()
+        ]);
+        
+        const allSessions = sessionsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        const questionnaireTitles = {};
+        questsSnap.forEach(doc => {
+            questionnaireTitles[doc.id] = doc.data().title;
+        });
 
-// Função para criar usuário admin inicial
-async function createAdminUser() {
-  try {
-    console.log('👑 Verificando usuário admin...');
-    
-    const adminSnapshot = await db.collection('users')
-      .where('username', '==', 'admin')
-      .limit(1)
-      .get();
+        // Mapeamento de usuários (Filtrando ADM)
+        const userNamesMap = {};
+        const allUsersList = [];
+        usersSnap.forEach(doc => {
+            const uData = doc.data();
+            const uid = String(doc.id);
+            // Ignora administradores no engajamento e pendências
+            if (uData.role !== 'admin' && uData.role !== 'administrator') {
+                userNamesMap[uid] = uData.full_name;
+                allUsersList.push({ id: uid, ...uData });
+            }
+        });
 
-    if (adminSnapshot.empty) {
-      console.log('👑 Criando usuário admin...');
-      
-      const adminPassword = 'admin123'; // ALTERE ISSO EM PRODUÇÃO!
-      const password_hash = await bcrypt.hash(adminPassword, 12);
-      
-      await db.collection('users').add({
-        username: 'admin',
-        full_name: 'Administrador',
-        email: 'admin@vivamais.com',
-        password_hash,
-        role: 'admin',
-        created_at: admin.firestore.FieldValue.serverTimestamp(),
-        updated_at: admin.firestore.FieldValue.serverTimestamp(),
-        is_active: true
-      });
-      
-      console.log('✅ Usuário admin criado com sucesso!');
-      console.log('📝 Login: admin / Senha: admin123');
-      console.log('⚠️  ALTERE A SENHA EM PRODUÇÃO!');
-    } else {
-      console.log('✅ Usuário admin já existe');
+        const activeUserCount = allUsersList.length;
+
+        // Aplicar Lotes (K-Anonymity) - BATCH SIZE = 5
+        const { releasedSessions } = getReleasedSessions(allSessions, 5);
+        
+        const monthlyCounts = new Array(12).fill(0);
+        const monthlyQuestionnaireCounts = new Array(12).fill(0);
+        let releasedRespondentNames = [];
+
+        releasedSessions.forEach(s => {
+            if (s.created_at) {
+                const date = s.created_at.toDate();
+                if (date.getFullYear() === targetYear) {
+                    monthlyCounts[date.getMonth()]++;
+                    
+                    const uid = s.user_id ? String(s.user_id) : null;
+                    const realName = (uid && userNamesMap[uid]) || s.respondent_name || 'Participante';
+                    const qTitle = questionnaireTitles[s.questionnaire_id] || 'Pesquisa';
+                    
+                    releasedRespondentNames.push({
+                        name: realName,
+                        questionnaire: qTitle
+                    });
+                }
+            }
+        });
+    
+        questsSnap.forEach(doc => {
+            const data = doc.data();
+            if (data.created_at) {
+                const date = data.created_at.toDate();
+                if (date.getFullYear() === targetYear) {
+                    monthlyQuestionnaireCounts[date.getMonth()]++;
+                }
+            }
+        });
+
+        // Lógica de Pendências
+        const pendingUsers = [];
+        allUsersList.forEach(user => {
+            const uid = user.id;
+            const userResponses = allSessions.filter(s => String(s.user_id) === uid);
+            const respondedQuests = new Set(userResponses.map(s => s.questionnaire_id));
+
+            questsSnap.forEach(qDoc => {
+                if (qDoc.data().is_active !== false && !respondedQuests.has(qDoc.id)) {
+                    pendingUsers.push({
+                        full_name: user.full_name,
+                        questionnaire: qDoc.data().title
+                    });
+                }
+            });
+        });
+  
+        // Cálculo de Engajamento Unificado (Excluindo Admins)
+        const potentialResponses = activeUserCount * questsSnap.size;
+        const engagementRate = potentialResponses > 0 
+            ? ((allSessions.length / potentialResponses) * 100).toFixed(1) 
+            : "0.0";
+  
+        res.json({
+            totalUsers: activeUserCount,
+            totalQuestionnaires: questsSnap.size,
+            responses: allSessions.length,
+            engagementRate: engagementRate,
+            activity: 9.2,
+            monthlyCounts,
+            monthlyQuestionnaireCounts,
+            respondents: releasedRespondentNames,
+            pendingUsers,
+            batchSize: 5
+        });
+    } catch (error) {
+        console.error('❌ Erro no Dashboard Público:', error);
+        res.status(500).json({ error: 'Erro ao buscar dados públicos' });
     }
-  } catch (error) {
-    console.error('❌ Erro ao criar usuário admin:', error);
-  }
-}
+});
+
+// === INICIALIZAÇÃO DO SERVIDOR ===
+// Nota: Em Firebase Functions, a inicialização é tratada pelo export.api no final do arquivo.
+
 
 // Tratamento de erros não capturados
 process.on('unhandledRejection', (err) => {

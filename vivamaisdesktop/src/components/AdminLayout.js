@@ -18,7 +18,8 @@ function AdminLayout() {
     const navigate = useNavigate();
     const location = useLocation();
     const theme = useTheme();
-    const isMobile = useMediaQuery(theme.breakpoints.down('md'));
+    const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
+    const isTablet = useMediaQuery(theme.breakpoints.between('sm', 'lg'));
     const [mobileOpen, setMobileOpen] = useState(false);
 
     const handleDrawerToggle = () => {
@@ -59,17 +60,23 @@ function AdminLayout() {
                         key={item.text} 
                         onClick={() => {
                             navigate(item.path);
-                            if (isMobile) setMobileOpen(false);
+                            if (isMobile || isTablet) setMobileOpen(false);
                         }}
                         selected={isSelected(item.path)}
                         sx={{ 
-                            borderRadius: 2, mb: 1,
-                            ...(isSelected(item.path) && {
-                                bgcolor: '#1b5e20', 
+                            borderRadius: 2, 
+                            mb: 1,
+                            transition: 'all 0.2s',
+                            '&.Mui-selected': {
+                                bgcolor: '#0e3a14 !important', // Verde bem escuro e forte
                                 color: '#fff', 
+                                boxShadow: '0 8px 16px rgba(14,58,20,0.2)',
                                 '& .MuiListItemIcon-root': { color: '#fff' },
-                                '&:hover': { bgcolor: '#144616' }
-                            })
+                                '&:hover': { bgcolor: '#0a2a0e !important' }
+                            },
+                            '&:hover': {
+                                bgcolor: 'rgba(27, 94, 32, 0.08)'
+                            }
                         }}
                     >
                         <ListItemIcon sx={{ color: isSelected(item.path) ? '#fff' : '#1b5e20' }}>{item.icon}</ListItemIcon>
@@ -90,7 +97,7 @@ function AdminLayout() {
 
     return (
         <Box sx={{ display: 'flex', minHeight: '100vh', bgcolor: '#f4f6f8' }}>
-            {isMobile && (
+            {(isMobile || isTablet) && (
                 <AppBar position="fixed" sx={{ zIndex: theme.zIndex.drawer + 1, bgcolor: '#fff', color: '#333' }}>
                     <Toolbar>
                         <IconButton
@@ -113,11 +120,11 @@ function AdminLayout() {
 
             <Box
                 component="nav"
-                sx={{ width: { md: drawerWidth }, flexShrink: { md: 0 } }}
+                sx={{ width: { lg: drawerWidth }, flexShrink: { lg: 0 } }}
             >
                 <Drawer
-                    variant={isMobile ? "temporary" : "permanent"}
-                    open={isMobile ? mobileOpen : true}
+                    variant={(isMobile || isTablet) ? "temporary" : "permanent"}
+                    open={(isMobile || isTablet) ? mobileOpen : true}
                     onClose={handleDrawerToggle}
                     ModalProps={{
                         keepMounted: true, 
@@ -134,9 +141,9 @@ function AdminLayout() {
                 component="main" 
                 sx={{ 
                     flexGrow: 1, 
-                    p: { xs: 2, sm: 3, md: 4 }, 
-                    pt: { xs: 12, md: 4 }, 
-                    width: { md: `calc(100% - ${drawerWidth}px)` },
+                    p: { xs: 2, sm: 3, lg: 4 }, 
+                    pt: { xs: 10, sm: 11, lg: 4 }, 
+                    width: { lg: `calc(100% - ${drawerWidth}px)` },
                     overflowY: 'auto',
                     height: '100vh',
                     boxSizing: 'border-box'

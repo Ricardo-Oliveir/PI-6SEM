@@ -83,6 +83,8 @@ function ResponsesViewPage() {
     const [sessions, setSessions] = useState([]);
     const [activeTab, setActiveTab] = useState(0);
     const [statistics, setStatistics] = useState({});
+    const [pendingUsers, setPendingUsers] = useState([]);
+    const [batchInfo, setBatchInfo] = useState({ batchSize: 5, isBatchRelease: false });
 
     const loadData = useCallback(async () => {
         try {
@@ -112,15 +114,29 @@ function ResponsesViewPage() {
             const sessionsData = Object.values(sessionMap);
             setSessions(sessionsData);
 
-            // 4. Calcular estatísticas por questão
-            if (qResponse.data.questions) {
+            // 4. Calcular estatísticas e buscar pendentes (Usando a rota de estatísticas que agora retorna mais dados)
+            const statsRes = await api.get(`/questionnaires/${questionnaireId}/statistics`);
+            const statsData = statsRes.data;
+            
+            if (statsData.questionStats) {
                 const stats = {};
-                qResponse.data.questions.forEach(question => {
-                    const questionResponses = responsesData.filter(r => r.question_id === question.id);
-                    stats[question.id] = calculateQuestionStats(question, questionResponses);
+                statsData.questionStats.forEach(qStat => {
+                    // Buscar respostas detalhadas para calcular a distribuição localmente se necessário
+                    // ou usar os dados agregados que vierem
+                    const questionResponses = responsesData.filter(r => r.question_id === qStat.questionId);
+                    stats[qStat.questionId] = calculateQuestionStats(
+                        qResponse.data.questions.find(q => q.id === qStat.questionId),
+                        questionResponses
+                    );
                 });
                 setStatistics(stats);
             }
+            
+            setPendingUsers(statsData.pendingUsers || []);
+            setBatchInfo({
+                batchSize: statsData.batchSize || 5,
+                isBatchRelease: statsData.isBatchRelease || false
+            });
 
         } catch (err) {
             console.error('Erro ao carregar dados:', err);
@@ -367,10 +383,22 @@ function ResponsesViewPage() {
                     }}
                 >
                     <Tab icon={<PieChartIcon />} iconPosition="start" label="Gráficos" />
-                    <Tab icon={<TableIcon />} iconPosition="start" label="Respondentes" />
+                    <Tab icon={<TableIcon />} iconPosition="start" label="Respondidos" />
+                    <Tab icon={<PersonIcon />} iconPosition="start" label="Pendentes" />
                     <Tab icon={<BarChartIcon />} iconPosition="start" label="Análise Detalhada" />
                 </Tabs>
             </Paper>
+
+            {batchInfo.isBatchRelease && (
+                <Alert 
+                    severity="info" 
+                    sx={{ mb: 3, borderRadius: '12px', border: '1px solid #b3e5fc' }}
+                >
+                    <Typography variant="body2" fontWeight={600}>
+                        🛡️ Anonimato Ativo: Os dados são liberados apenas em lotes de {batchInfo.batchSize} pessoas.
+                    </Typography>
+                </Alert>
+            )}
 
             {/* Tab 0: Gráficos */}
             {activeTab === 0 && (
@@ -533,8 +561,65 @@ function ResponsesViewPage() {
                 </Paper>
             )}
 
-            {/* Tab 2: Análise Detalhada */}
+            {/* Tab 2: Pendentes */}
             {activeTab === 2 && (
+                <Paper sx={styles.tableContainer}>
+                    <TableContainer>
+                        <Table>
+                            <TableHead>
+                                <TableRow sx={{ backgroundColor: '#FFF5F5' }}>
+                                    <TableCell sx={{ fontWeight: 'bold' }}>Colaborador</TableCell>
+                                    <TableCell sx={{ fontWeight: 'bold' }}>Status</TableCell>
+                                </TableRow>
+                            </TableHead>
+                            <TableBody>
+                                {pendingUsers.length > 0 ? pendingUsers.map((user, index) => (
+                                    <TableRow key={user.id} hover>
+                                        <TableCell>
+                                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                                                <Avatar sx={{ bgcolor: '#d32f2f', width: 32, height: 32, fontSize: 14 }}>
+                                                    {user.full_name.charAt(0)}
+                                                </Avatar>
+                                                <Box>
+                                                    <Typography fontWeight={600}>{user.full_name}</Typography>
+                                                    <Typography variant="caption" color="textSecondary">@{user.username}</Typography>
+                                                </Box>
+                                            </Box>
+                                        </TableCell>
+                                        <TableCell>
+                                            {user.has_responded ? (
+                                                <Chip 
+                                                    label="Aguardando Lote" 
+                                                    size="small"
+                                                    sx={{ bgcolor: '#FFF8E1', color: '#F57C00', fontWeight: 600 }}
+                                                />
+                                            ) : (
+                                                <Chip 
+                                                    label="Pendente" 
+                                                    size="small"
+                                                    variant="outlined"
+                                                    sx={{ color: '#d32f2f', borderColor: '#d32f2f' }}
+                                                />
+                                            )}
+                                        </TableCell>
+                                    </TableRow>
+                                )) : (
+                                    <TableRow>
+                                        <TableCell colSpan={2} align="center" sx={{ py: 6 }}>
+                                            <Typography color="textSecondary">
+                                                Todos os colaboradores já tiveram suas respostas processadas.
+                                            </Typography>
+                                        </TableCell>
+                                    </TableRow>
+                                )}
+                            </TableBody>
+                        </Table>
+                    </TableContainer>
+                </Paper>
+            )}
+
+            {/* Tab 3: Análise Detalhada */}
+            {activeTab === 3 && (
                 <Grid container spacing={3}>
                     {questions.map((question, index) => {
                         const stats = statistics[question.id] || { total: 0, distribution: {} };

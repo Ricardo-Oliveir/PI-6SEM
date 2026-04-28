@@ -1,5 +1,5 @@
 param(
-    [string]$ProjectId = "projeto-vida-quest"
+    [string]$ProjectId = "projeto-vivamais-2026"
 )
 
 if (-not (Get-Command firebase -ErrorAction SilentlyContinue)) {

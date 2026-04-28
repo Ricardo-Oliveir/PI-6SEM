@@ -2,11 +2,11 @@ import React, { useState, useEffect } from 'react';
 import {
     Box, Button, TextField, Typography, Paper, Stack, Table, TableBody,
     TableCell, TableContainer, TableHead, TableRow, IconButton, Grid, CircularProgress,
-    FormControl, InputLabel, Select, MenuItem, Tooltip
+    FormControl, InputLabel, Select, MenuItem, Tooltip, Chip, Divider
 } from '@mui/material';
 import { 
     Delete as DeleteIcon, Add as AddIcon, Edit as EditIcon, 
-    Cancel as CancelIcon, Search as SearchIcon 
+    Cancel as CancelIcon, Search as SearchIcon, People as PeopleIcon
 } from '@mui/icons-material';
 import { InputAdornment } from '@mui/material';
 import api from '../services/api';
@@ -21,7 +21,7 @@ function UserManagerPage() {
     const [editingUserId, setEditingUserId] = useState(null);
     const [searchTerm, setSearchTerm] = useState('');
     const [formData, setFormData] = useState({
-        username: '', full_name: '', email: '', password: '',
+        username: '', full_name: '', email: '', password: '', confirm_password: '',
         phone: '', address: '', role: 'user'
     });
     const [capturedPhoto, setCapturedPhoto] = useState(null);
@@ -48,7 +48,7 @@ function UserManagerPage() {
         setEditingUserId(null);
         setCapturedPhoto(null);
         setCapturedDescriptor(null);
-        setFormData({ username: '', full_name: '', email: '', password: '', phone: '', address: '', role: 'user' });
+        setFormData({ username: '', full_name: '', email: '', password: '', confirm_password: '', phone: '', address: '', role: 'user' });
     };
 
     const handleEditClick = (u) => {
@@ -58,6 +58,7 @@ function UserManagerPage() {
             full_name: u.full_name || '',
             email: u.email || '',
             password: '',
+            confirm_password: '',
             phone: u.phone || '',
             address: u.address || '',
             role: u.role || 'user'
@@ -71,14 +72,42 @@ function UserManagerPage() {
     const handleSave = async () => {
         setLoading(true);
         try {
-            // 1. Re-buscar usuários do servidor para garantir lista mais atualizada
+            // 1. Validação básica
+            if (!formData.full_name || !formData.username) {
+                alert("Nome e Usuário são obrigatórios.");
+                setLoading(false);
+                return;
+            }
+
+            if (!editingUserId && (!formData.password || formData.password.length < 6)) {
+                alert("A senha deve ter pelo menos 6 caracteres.");
+                setLoading(false);
+                return;
+            }
+
+            if (formData.password && formData.password.length < 6) {
+                alert("A nova senha deve ter pelo menos 6 caracteres.");
+                setLoading(false);
+                return;
+            }
+
+            if (formData.password && formData.password !== formData.confirm_password) {
+                alert("As senhas não coincidem.");
+                setLoading(false);
+                return;
+            }
+
+            // 2. Re-buscar usuários do servidor para garantir lista mais atualizada
             const res = await api.get('/users');
             const latestUsers = res.data;
 
-            // 2. Validação Biométrica (DUPLICIDADE)
-            if (!editingUserId && capturedDescriptor) {
+            // 3. Validação Biométrica (DUPLICIDADE)
+            if (capturedDescriptor) {
                 let matches = [];
                 latestUsers.forEach(u => {
+                    // Ignorar o próprio usuário se estiver editando
+                    if (editingUserId && u.id === editingUserId) return;
+
                     if (u.face_descriptor) {
                         try {
                             const savedDescriptor = Array.isArray(u.face_descriptor) 
@@ -173,17 +202,34 @@ function UserManagerPage() {
                                     <TextField label="Nome Completo" fullWidth value={formData.full_name} onChange={e => setFormData({ ...formData, full_name: e.target.value })} variant="filled" />
                                 </Grid>
                                 <Grid item xs={12} md={6}>
-                                    <TextField label="E-mail" fullWidth value={formData.email} onChange={e => setFormData({ ...formData, email: e.target.value })} disabled={!!editingUserId} variant="filled" />
+                                    <TextField label="E-mail" fullWidth value={formData.email} onChange={e => setFormData({ ...formData, email: e.target.value })} variant="filled" />
                                 </Grid>
                                 <Grid item xs={12} md={6}>
-                                    <TextField label="Login / Usuário" fullWidth value={formData.username} onChange={e => setFormData({ ...formData, username: e.target.value })} disabled={!!editingUserId} variant="filled" />
+                                    <TextField label="Login / Usuário" fullWidth value={formData.username} onChange={e => setFormData({ ...formData, username: e.target.value })} variant="filled" />
                                 </Grid>
 
-                                {!editingUserId && (
-                                    <Grid item xs={12}>
-                                        <TextField label="Senha de Acesso" type="password" fullWidth value={formData.password} onChange={e => setFormData({ ...formData, password: e.target.value })} variant="filled" />
-                                    </Grid>
-                                )}
+                                    <>
+                                        <Grid item xs={12} md={6}>
+                                            <TextField 
+                                                label={editingUserId ? "Nova Senha (deixe em branco para manter)" : "Senha de Acesso"} 
+                                                type="password" 
+                                                fullWidth 
+                                                value={formData.password} 
+                                                onChange={e => setFormData({ ...formData, password: e.target.value })} 
+                                                variant="filled" 
+                                            />
+                                        </Grid>
+                                        <Grid item xs={12} md={6}>
+                                            <TextField 
+                                                label="Confirmar Senha" 
+                                                type="password" 
+                                                fullWidth 
+                                                value={formData.confirm_password} 
+                                                onChange={e => setFormData({ ...formData, confirm_password: e.target.value })} 
+                                                variant="filled" 
+                                            />
+                                        </Grid>
+                                    </>
 
                                 <Grid item xs={12} md={6}>
                                     <FormControl fullWidth variant="filled">
@@ -220,10 +266,14 @@ function UserManagerPage() {
                                 p: 3,
                                 border: '2px dashed #e2e8f0'
                             }}>
-                                <Typography variant="overline" sx={{ fontWeight: 'bold', mb: 2, color: '#1b5e20' }}>CAPTURA FACIAL OBRIGATÓRIA</Typography>
+                                <Typography variant="overline" sx={{ fontWeight: 'bold', mb: 2, color: '#1b5e20' }}>CAPTURA FACIAL (OPCIONAL)</Typography>
                                 
                                 <Box sx={{ width: '100%', maxWidth: 350 }}>
-                                    <FaceCapture onCapture={(desc, photo) => { setCapturedDescriptor(desc); setCapturedPhoto(photo); }} />
+                                    <FaceCapture 
+                                        autoStart={false} 
+                                        autoCapture={false} 
+                                        onCapture={(desc, photo) => { setCapturedDescriptor(desc); setCapturedPhoto(photo); }} 
+                                    />
                                 </Box>
 
                                 {capturedPhoto && (
@@ -251,7 +301,7 @@ function UserManagerPage() {
                         <Button 
                             variant="contained" 
                             onClick={handleSave} 
-                            disabled={loading || (!capturedPhoto && !editingUserId)} 
+                            disabled={loading} 
                             sx={{ 
                                 bgcolor: '#1b5e20', 
                                 px: 6, 
@@ -291,59 +341,155 @@ function UserManagerPage() {
                 />
             </Box>
 
-            <TableContainer component={Paper} sx={{ borderRadius: 4, boxShadow: '0 4px 20px rgba(0,0,0,0.05)' }}>
-                <Table>
-                    <TableHead sx={{ bgcolor: '#e8f5e9' }}>
-                        <TableRow>
-                            <TableCell>Foto</TableCell>
-                            <TableCell>Nome / Login</TableCell>
-                            <TableCell>Perfil</TableCell>
-                            <TableCell>Contato</TableCell>
-                            <TableCell align="right">Ações</TableCell>
-                        </TableRow>
-                    </TableHead>
-                    <TableBody>
-                        {filteredUsers.length > 0 ? filteredUsers.map((u) => (
-                            <TableRow key={u.id} hover>
-                                <TableCell>
-                                    <Box sx={{ width: 45, height: 45, borderRadius: '50%', overflow: 'hidden', bgcolor: '#ccc' }}>
-                                        {u.face_photo && <img src={u.face_photo} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />}
-                                    </Box>
-                                </TableCell>
-                                <TableCell>
-                                    <Typography sx={{ fontWeight: 600 }}>{u.full_name}</Typography>
-                                    <Typography variant="caption">@{u.username}</Typography>
-                                </TableCell>
-                                <TableCell>
-                                    {u.role === 'admin' ?
-                                        <Typography sx={{ fontWeight: 'bold', color: '#1b5e20' }}>Administrador</Typography> :
-                                        <Typography sx={{ color: '#555' }}>Respondente</Typography>
-                                    }
-                                </TableCell>
-                                <TableCell>{u.email}<br />{u.phone}</TableCell>
-                                <TableCell align="right">
-                                    <Tooltip title="Editar Usuário">
-                                        <IconButton color="primary" onClick={() => handleEditClick(u)}>
-                                            <EditIcon />
-                                        </IconButton>
-                                    </Tooltip>
-                                    <Tooltip title="Excluir Usuário">
-                                        <IconButton color="error" onClick={async () => { if (window.confirm("Excluir definitivamente?")) { await api.delete(`/users/${u.id}`); fetchUsers(); } }}>
-                                            <DeleteIcon />
-                                        </IconButton>
-                                    </Tooltip>
-                                </TableCell>
-                            </TableRow>
-                        )) : (
+            {/* Lista de Usuários Responsiva */}
+            <Box sx={{ mt: 2 }}>
+                {/* Versão Desktop (Tabela Única para Alinhamento Perfeito) */}
+                <Paper sx={{ display: { xs: 'none', md: 'block' }, borderRadius: 4, overflow: 'hidden', boxShadow: '0 4px 20px rgba(0,0,0,0.05)' }}>
+                    <Table>
+                        <TableHead sx={{ bgcolor: '#e8f5e9' }}>
                             <TableRow>
-                                <TableCell colSpan={5} align="center" sx={{ py: 3 }}>
-                                    <Typography color="textSecondary">Nenhum colaborador encontrado.</Typography>
-                                </TableCell>
+                                <TableCell sx={{ width: 100, fontWeight: 800, color: '#1b5e20' }}>Foto</TableCell>
+                                <TableCell sx={{ width: '30%', fontWeight: 800, color: '#1b5e20' }}>Nome / Login</TableCell>
+                                <TableCell sx={{ width: '20%', fontWeight: 800, color: '#1b5e20' }}>Perfil</TableCell>
+                                <TableCell sx={{ width: '30%', fontWeight: 800, color: '#1b5e20' }}>Contato</TableCell>
+                                <TableCell align="right" sx={{ fontWeight: 800, color: '#1b5e20' }}>Ações</TableCell>
                             </TableRow>
-                        )}
-                    </TableBody>
-                </Table>
-            </TableContainer>
+                        </TableHead>
+                        <TableBody>
+                            {filteredUsers.length > 0 ? filteredUsers.map((u) => (
+                                <TableRow 
+                                    key={u.id} 
+                                    hover 
+                                    sx={{ 
+                                        '& .MuiTableCell-root': { py: 2, verticalAlign: 'middle', borderBottom: '1px solid #f1f5f9' },
+                                        transition: '0.2s',
+                                        '&:hover': { bgcolor: 'rgba(232, 245, 233, 0.4)' }
+                                    }}
+                                >
+                                    <TableCell>
+                                        <Box sx={{ 
+                                            width: 48, 
+                                            height: 48, 
+                                            borderRadius: '50%', 
+                                            overflow: 'hidden', 
+                                            bgcolor: '#f1f5f9', 
+                                            border: '2px solid #e2e8f0',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            boxShadow: '0 2px 4px rgba(0,0,0,0.05)'
+                                        }}>
+                                            {u.face_photo ? (
+                                                <img src={u.face_photo} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                            ) : (
+                                                <PeopleIcon sx={{ color: '#94a3b8', fontSize: 24 }} />
+                                            )}
+                                        </Box>
+                                    </TableCell>
+                                    <TableCell>
+                                        <Typography sx={{ fontWeight: 700, color: '#333', lineHeight: 1.2 }}>{u.full_name || 'Usuário Sem Nome'}</Typography>
+                                        <Typography variant="caption" sx={{ color: 'text.secondary' }}>@{u.username || 'user'}</Typography>
+                                    </TableCell>
+                                    <TableCell>
+                                        <Chip 
+                                            label={u.role === 'admin' ? 'Administrador' : 'Respondente'} 
+                                            size="small"
+                                            sx={{ 
+                                                bgcolor: u.role === 'admin' ? 'rgba(27,94,32,0.1)' : 'rgba(0,0,0,0.05)',
+                                                color: u.role === 'admin' ? '#1b5e20' : '#666',
+                                                fontWeight: 700,
+                                                minWidth: 110
+                                            }}
+                                        />
+                                    </TableCell>
+                                    <TableCell>
+                                        <Typography variant="body2" sx={{ fontWeight: 500 }}>{u.email || 'Email não cadastrado'}</Typography>
+                                        {u.phone && <Typography variant="caption" color="text.secondary">{u.phone}</Typography>}
+                                    </TableCell>
+                                    <TableCell align="right">
+                                        <Stack direction="row" spacing={1} justifyContent="flex-end">
+                                            <Tooltip title="Editar">
+                                                <IconButton color="primary" onClick={() => handleEditClick(u)} size="small" sx={{ bgcolor: 'rgba(25,118,210,0.05)' }}>
+                                                    <EditIcon />
+                                                </IconButton>
+                                            </Tooltip>
+                                            <Tooltip title="Excluir">
+                                                <IconButton color="error" onClick={async () => { if (window.confirm("Excluir definitivamente?")) { await api.delete(`/users/${u.id}`); fetchUsers(); } }} size="small" sx={{ bgcolor: 'rgba(211,47,47,0.05)' }}>
+                                                    <DeleteIcon />
+                                                </IconButton>
+                                            </Tooltip>
+                                        </Stack>
+                                    </TableCell>
+                                </TableRow>
+                            )) : (
+                                <TableRow>
+                                    <TableCell colSpan={5} align="center" sx={{ py: 5 }}>
+                                        <Typography color="textSecondary">Nenhum colaborador encontrado.</Typography>
+                                    </TableCell>
+                                </TableRow>
+                            )}
+                        </TableBody>
+                    </Table>
+                </Paper>
+
+                {/* Versão Mobile (Cards - Mantida para Responsividade) */}
+                <Stack spacing={2} sx={{ display: { xs: 'flex', md: 'none' } }}>
+                    {filteredUsers.length > 0 && filteredUsers.map((u) => (
+                        <Paper 
+                            key={u.id} 
+                            sx={{ 
+                                p: 2, 
+                                borderRadius: 4, 
+                                boxShadow: '0 4px 20px rgba(0,0,0,0.05)',
+                                overflow: 'hidden'
+                            }}
+                        >
+                            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                                    <Box sx={{ 
+                                        width: 64, 
+                                        height: 64, 
+                                        borderRadius: '50%', 
+                                        overflow: 'hidden', 
+                                        bgcolor: '#f1f5f9', 
+                                        border: '3px solid #1b5e20',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        boxShadow: '0 4px 10px rgba(0,0,0,0.1)'
+                                    }}>
+                                        {u.face_photo ? (
+                                            <img src={u.face_photo} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                        ) : (
+                                            <PeopleIcon sx={{ color: '#94a3b8', fontSize: 32 }} />
+                                        )}
+                                    </Box>
+                                    <Box sx={{ flexGrow: 1 }}>
+                                        <Typography variant="subtitle1" sx={{ fontWeight: 800 }}>{u.full_name}</Typography>
+                                        <Typography variant="body2" color="text.secondary">@{u.username}</Typography>
+                                        <Chip 
+                                            label={u.role === 'admin' ? 'Administrador' : 'Respondente'} 
+                                            size="small"
+                                            sx={{ mt: 0.5, height: 20, fontSize: '0.65rem', fontWeight: 800 }}
+                                        />
+                                    </Box>
+                                    <Box sx={{ display: 'flex', flexDirection: 'column' }}>
+                                        <IconButton color="primary" onClick={() => handleEditClick(u)}><EditIcon /></IconButton>
+                                        <IconButton color="error" onClick={async () => { if (window.confirm("Excluir definitivamente?")) { await api.delete(`/users/${u.id}`); fetchUsers(); } }}><DeleteIcon /></IconButton>
+                                    </Box>
+                                </Box>
+                                <Divider />
+                                <Box>
+                                    <Typography variant="caption" display="block" sx={{ fontWeight: 'bold' }}>CONTATO:</Typography>
+                                    <Typography variant="body2">{u.email}</Typography>
+                                    <Typography variant="body2">{u.phone}</Typography>
+                                </Box>
+                            </Box>
+                        </Paper>
+                    ))}
+                </Stack>
+
+            </Box>
         </Box>
     );
 }

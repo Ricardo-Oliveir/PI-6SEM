@@ -143,59 +143,75 @@ function LoginPage() {
                 <Paper elevation={4} sx={{ p: 4, width: '100%', maxWidth: 400, borderRadius: 4, textAlign: 'center' }}>
                     <Typography variant="h5" sx={{ mb: 4, fontWeight: 700, color: '#1b5e20' }}>Acesso Restrito</Typography>
 
-                    <Stack spacing={2.5}>
-                        <TextField
-                            label="Usuário"
-                            fullWidth
-                            value={username}
-                            onChange={e => setUsername(e.target.value)}
-                        />
-                        <TextField
-                            label="Senha"
-                            type={showPassword ? 'text' : 'password'}
-                            fullWidth
-                            value={password}
-                            onChange={e => setPassword(e.target.value)}
-                            InputProps={{
-                                endAdornment: (
-                                    <InputAdornment position="end">
-                                        <IconButton onClick={() => setShowPassword(!showPassword)}>
-                                            {showPassword ? <VisibilityOff /> : <Visibility />}
-                                        </IconButton>
-                                    </InputAdornment>
-                                )
-                            }}
-                        />
-                        <Button
-                            variant="contained"
-                            fullWidth
-                            size="large"
-                            onClick={() => {
-                                setLoading(true);
-                                api.post('/auth/login', { username, password })
-                                    .then(res => loginSuccess(res.data.user, res.data.token || res.data.accessToken))
-                                    .catch(() => alert("Credenciais inválidas"))
-                                    .finally(() => setLoading(false));
-                            }}
-                            sx={{ bgcolor: '#1b5e20', py: 1.8, fontWeight: 'bold' }}
-                        >
-                            {loading ? <CircularProgress size={24} color="inherit" /> : 'ENTRAR NO SISTEMA'}
-                        </Button>
+                    <form onSubmit={(e) => {
+                        e.preventDefault();
+                        setLoading(true);
+                        api.post('/auth/login', { username, password })
+                            .then(res => loginSuccess(res.data.user, res.data.token || res.data.accessToken))
+                            .catch(() => alert("Credenciais inválidas"))
+                            .finally(() => setLoading(false));
+                    }}>
+                        <Stack spacing={2.5}>
+                            <TextField
+                                label="Usuário"
+                                fullWidth
+                                value={username}
+                                onChange={e => setUsername(e.target.value)}
+                            />
+                            <TextField
+                                label="Senha"
+                                type={showPassword ? 'text' : 'password'}
+                                fullWidth
+                                value={password}
+                                onChange={e => setPassword(e.target.value)}
+                                InputProps={{
+                                    endAdornment: (
+                                        <InputAdornment position="end">
+                                            <IconButton onClick={() => setShowPassword(!showPassword)}>
+                                                {showPassword ? <VisibilityOff /> : <Visibility />}
+                                            </IconButton>
+                                        </InputAdornment>
+                                    )
+                                }}
+                            />
+                            <Button
+                                variant="contained"
+                                fullWidth
+                                size="large"
+                                type="submit"
+                                sx={{ bgcolor: '#1b5e20', py: 1.8, fontWeight: 'bold' }}
+                            >
+                                {loading ? <CircularProgress size={24} color="inherit" /> : 'ENTRAR NO SISTEMA'}
+                            </Button>
 
-                        <Divider>OU</Divider>
+                            <Link 
+                                href="https://wa.me/5519997412511?text=Olá,%20esqueci%20minha%20senha%20do%20portal%20Vida%20Mais." 
+                                target="_blank"
+                                sx={{ 
+                                    color: '#666', 
+                                    fontSize: '0.85rem', 
+                                    textDecoration: 'none', 
+                                    '&:hover': { color: '#1b5e20', textDecoration: 'underline' } 
+                                }}
+                            >
+                                Esqueceu a senha? Clique aqui para suporte.
+                            </Link>
 
-                        <Button
-                            variant="outlined"
-                            fullWidth
-                            size="large"
-                            startIcon={<CameraIcon />}
-                            onClick={() => setShowCamera(true)}
-                            color="success"
-                            sx={{ py: 1.5, fontWeight: 'bold', borderWidth: 2 }}
-                        >
-                            RECONHECIMENTO FACIAL
-                        </Button>
-                    </Stack>
+                            <Divider>OU</Divider>
+
+                            <Button
+                                variant="outlined"
+                                fullWidth
+                                size="large"
+                                startIcon={<CameraIcon />}
+                                onClick={() => setShowCamera(true)}
+                                color="success"
+                                sx={{ py: 1.5, fontWeight: 'bold', borderWidth: 2 }}
+                            >
+                                RECONHECIMENTO FACIAL
+                            </Button>
+                        </Stack>
+                    </form>
 
                     {showCamera && (
                         <Box sx={{ mt: 3 }}>

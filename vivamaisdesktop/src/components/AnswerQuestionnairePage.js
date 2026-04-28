@@ -3,8 +3,16 @@ import { useParams, useNavigate } from 'react-router-dom';
 import {
     Box, Typography, Card, CardContent, Button, CircularProgress,
     Radio, RadioGroup, FormControlLabel, FormControl,
-    TextField, Rating, Stack
+    TextField, Rating, Stack, IconButton, Tooltip, Paper
 } from '@mui/material';
+import { 
+    VolumeUp as SpeakIcon, 
+    Mic as MicIcon, 
+    MicOff as MicOffIcon,
+    ArrowBack as BackIcon,
+    TextIncrease as IncreaseIcon,
+    TextDecrease as DecreaseIcon
+} from '@mui/icons-material';
 import api from '../services/api';
 
 function AnswerQuestionnairePage() {
@@ -15,6 +23,8 @@ function AnswerQuestionnairePage() {
     const [loading, setLoading] = useState(true);
     const [submitting, setSubmitting] = useState(false);
     const [answers, setAnswers] = useState({});
+    const [listening, setListening] = useState(null); // ID da pergunta atual sendo ouvida
+    const [fontScale, setFontScale] = useState(1); // Escala de fonte: 1 = normal, 1.2, 1.4, etc.
 
     const userStr = localStorage.getItem('user_data');
     const user = userStr ? JSON.parse(userStr) : {};
@@ -69,6 +79,15 @@ function AnswerQuestionnairePage() {
             ...prev,
             [questionId]: { value, numeric_value: numericValue }
         }));
+
+        // FEEDBACK DE VOZ PARA A ESCOLHA
+        if (value === 'Sim' || value === 'Não') {
+            handleSpeak(`Você selecionou: ${value}`);
+        } else if (numericValue !== null) {
+            handleSpeak(`Você deu nota: ${numericValue}`);
+        } else if (typeof value === 'string' && value.length < 50) {
+            handleSpeak(`Selecionado: ${value}`);
+        }
     };
 
     const handleSubmit = async () => {
@@ -116,6 +135,37 @@ function AnswerQuestionnairePage() {
         }
     };
 
+    const handleSpeak = (text) => {
+        if ('speechSynthesis' in window) {
+            window.speechSynthesis.cancel();
+            const utterance = new SpeechSynthesisUtterance(text);
+            utterance.lang = 'pt-BR';
+            window.speechSynthesis.speak(utterance);
+        }
+    };
+
+    const handleListen = (questionId) => {
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (!SpeechRecognition) {
+            alert("Seu navegador não suporta reconhecimento de voz.");
+            return;
+        }
+
+        const recognition = new SpeechRecognition();
+        recognition.lang = 'pt-BR';
+        recognition.interimResults = false;
+
+        recognition.onstart = () => setListening(questionId);
+        recognition.onend = () => setListening(null);
+        
+        recognition.onresult = (event) => {
+            const transcript = event.results[0][0].transcript;
+            handleAnswer(questionId, transcript);
+        };
+
+        recognition.start();
+    };
+
     const renderQuestionInput = (q) => {
         const val = answers[q.id]?.value || '';
 
@@ -125,7 +175,13 @@ function AnswerQuestionnairePage() {
                     <FormControl component="fieldset" fullWidth>
                         <RadioGroup value={val} onChange={(e) => handleAnswer(q.id, e.target.value)}>
                             {q.options && q.options.map((opt, idx) => (
-                                <FormControlLabel key={idx} value={opt} control={<Radio color="success" />} label={opt} />
+                                <FormControlLabel 
+                                    key={idx} 
+                                    value={opt} 
+                                    control={<Radio color="success" size="large" />} 
+                                    label={<Typography sx={{ fontSize: '1.3rem', fontWeight: 500 }}>{opt}</Typography>} 
+                                    sx={{ mb: 1 }}
+                                />
                             ))}
                         </RadioGroup>
                     </FormControl>
@@ -134,8 +190,8 @@ function AnswerQuestionnairePage() {
                 return (
                     <FormControl component="fieldset" fullWidth>
                         <RadioGroup row value={val} onChange={(e) => handleAnswer(q.id, e.target.value)}>
-                            <FormControlLabel value="Sim" control={<Radio color="success" />} label="Sim" />
-                            <FormControlLabel value="Não" control={<Radio color="error" />} label="Não" />
+                            <FormControlLabel value="Sim" control={<Radio color="success" size="large" />} label={<Typography sx={{ fontSize: '1.4rem', fontWeight: 700, px: 2 }}>Sim</Typography>} />
+                            <FormControlLabel value="Não" control={<Radio color="error" size="large" />} label={<Typography sx={{ fontSize: '1.4rem', fontWeight: 700, px: 2 }}>Não</Typography>} />
                         </RadioGroup>
                     </FormControl>
                 );
@@ -152,15 +208,33 @@ function AnswerQuestionnairePage() {
             case 'text':
             default:
                 return (
-                    <TextField
-                        fullWidth
-                        multiline
-                        rows={3}
-                        variant="outlined"
-                        placeholder="Sua resposta..."
-                        value={val}
-                        onChange={(e) => handleAnswer(q.id, e.target.value)}
-                    />
+                    <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1 }}>
+                        <TextField
+                            fullWidth
+                            multiline
+                            rows={3}
+                            variant="outlined"
+                            placeholder="Toque no microfone para falar ou digite aqui..."
+                            value={val}
+                            onChange={(e) => handleAnswer(q.id, e.target.value)}
+                            InputProps={{
+                                sx: { fontSize: '1.2rem', bgcolor: '#fff' }
+                            }}
+                        />
+                        <Tooltip title="Responder falando">
+                            <IconButton 
+                                onClick={() => handleListen(q.id)} 
+                                color={listening === q.id ? 'error' : 'primary'}
+                                sx={{ 
+                                    mt: 1, 
+                                    bgcolor: listening === q.id ? 'rgba(211,47,47,0.1)' : 'rgba(25,118,210,0.1)',
+                                    animation: listening === q.id ? 'pulse 1.5s infinite' : 'none'
+                                }}
+                            >
+                                {listening === q.id ? <MicOffIcon fontSize="large" /> : <MicIcon fontSize="large" />}
+                            </IconButton>
+                        </Tooltip>
+                    </Box>
                 );
         }
     };
@@ -168,28 +242,69 @@ function AnswerQuestionnairePage() {
     if (loading) return <Box textAlign="center" mt={10}><CircularProgress color="success" /></Box>;
 
     return (
-        <Box sx={{ minHeight: '100vh', bgcolor: '#f4f6f8', py: 5, px: 2 }}>
-            <Box sx={{ maxWidth: 700, margin: '0 auto' }}>
-                <Card sx={{ mb: 4, borderRadius: 4, bgcolor: '#1b5e20', color: '#fff' }}>
-                    <CardContent sx={{ p: 4, textAlign: 'center' }}>
-                        <Typography variant="h4" sx={{ fontWeight: 800, mb: 1 }}>{questionnaire?.title}</Typography>
-                        <Typography variant="body1" sx={{ opacity: 0.9 }}>
+        <Box sx={{ 
+            minHeight: '100vh', 
+            bgcolor: '#f4f6f8', 
+            py: 5, 
+            px: 2,
+            '& .MuiTypography-root': { transition: 'font-size 0.2s' } 
+        }}>
+                {/* TOOLBAR PADRÃO DE ACESSIBILIDADE */}
+                <Paper sx={{ 
+                    position: 'sticky', 
+                    top: 10, 
+                    zIndex: 1000, 
+                    mb: 4, 
+                    p: 2, 
+                    borderRadius: 3, 
+                    display: 'flex', 
+                    justifyContent: 'center', 
+                    gap: 3,
+                    boxShadow: '0 4px 20px rgba(0,0,0,0.1)',
+                    border: '2px solid #1b5e20'
+                }}>
+                    <Typography variant="body1" sx={{ alignSelf: 'center', fontWeight: 800, color: '#1b5e20' }}>CONTROLE DE TEXTO:</Typography>
+                    <Button variant="outlined" startIcon={<DecreaseIcon />} onClick={() => setFontScale(p => Math.max(1, p - 0.2))} sx={{ fontWeight: 800, borderWidth: 2 }}>DIMINUIR</Button>
+                    <Button variant="contained" startIcon={<IncreaseIcon />} onClick={() => setFontScale(p => Math.min(2, p + 0.2))} sx={{ bgcolor: '#1b5e20', fontWeight: 800 }}>AUMENTAR FONTE (A+)</Button>
+                </Paper>
+
+                <Card sx={{ 
+                    mb: 4, 
+                    borderRadius: 4, 
+                    bgcolor: '#1b5e20', 
+                    color: '#fff', 
+                    boxShadow: '0 8px 32px rgba(27,94,32,0.15)' 
+                }}>
+                    <CardContent sx={{ p: { xs: 3, md: 4 }, textAlign: 'center' }}>
+                        <Typography variant="h4" sx={{ fontWeight: 800, mb: 1, fontSize: `${2.125 * fontScale}rem` }}>{questionnaire?.title}</Typography>
+                        <Typography variant="body1" sx={{ opacity: 0.9, fontSize: `${1 * fontScale}rem` }}>
                             {questionnaire?.description}
                         </Typography>
-                        <Typography variant="caption" sx={{ display: 'block', mt: 3, opacity: 0.7 }}>
+                        <Typography variant="caption" sx={{ display: 'block', mt: 3, opacity: 0.7, fontSize: `${0.75 * fontScale}rem` }}>
                             * Suas respostas não estarão atreladas ao seu nome nos relatórios em respeito a sua privacidade.
                         </Typography>
                     </CardContent>
                 </Card>
 
                 {questions.map((q, index) => (
-                    <Card key={q.id} sx={{ mb: 3, borderRadius: 3, boxShadow: '0 2px 8px rgba(0,0,0,0.06)' }}>
-                        <CardContent sx={{ p: 3 }}>
-                            <Typography variant="h6" sx={{ fontWeight: 700, mb: 2 }}>
-                                {index + 1}. {q.text}
-                                {q.is_required && <span style={{ color: '#d32f2f', marginLeft: 4 }}>*</span>}
-                            </Typography>
-                            {renderQuestionInput(q)}
+                    <Card key={q.id} sx={{ mb: 4, borderRadius: 4, boxShadow: '0 4px 20px rgba(0,0,0,0.08)', border: '1px solid #e2e8f0' }}>
+                        <CardContent sx={{ p: { xs: 3, md: 4 } }}>
+                            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 3 }}>
+                                <Typography variant="h5" sx={{ fontWeight: 800, color: '#333', fontSize: `${1.5 * fontScale}rem` }}>
+                                    {index + 1}. {q.text}
+                                    {q.is_required && <span style={{ color: '#d32f2f', marginLeft: 8 }}>*</span>}
+                                </Typography>
+                                <Tooltip title="Ouvir pergunta">
+                                    <IconButton onClick={() => handleSpeak(q.text)} sx={{ bgcolor: 'rgba(27,94,32,0.1)', color: '#1b5e20' }}>
+                                        <SpeakIcon fontSize="large" />
+                                    </IconButton>
+                                </Tooltip>
+                            </Box>
+                            
+                            {/* APLICANDO FONT SCALE NO RENDER INPUT */}
+                            <Box sx={{ '& .MuiTypography-root': { fontSize: `${1 * fontScale}rem` } }}>
+                                {renderQuestionInput(q)}
+                            </Box>
                         </CardContent>
                     </Card>
                 ))}
@@ -202,14 +317,13 @@ function AnswerQuestionnairePage() {
                         variant="contained"
                         color="success"
                         size="large"
-                        sx={{ px: 4, py: 1.5, borderRadius: 2, bgcolor: '#1b5e20' }}
+                        sx={{ px: { xs: 2, md: 4 }, py: 1.5, borderRadius: 2, bgcolor: '#1b5e20', fontWeight: 800 }}
                         onClick={handleSubmit}
                         disabled={submitting || questions.length === 0}
                     >
                         {submitting ? <CircularProgress size={24} color="inherit" /> : 'ENVIAR RESPOSTAS'}
                     </Button>
                 </Stack>
-            </Box>
         </Box>
     );
 }

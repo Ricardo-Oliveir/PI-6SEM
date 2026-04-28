@@ -1,10 +1,11 @@
 import React, { useRef, useState, useCallback, useEffect } from 'react';
 import Webcam from 'react-webcam';
-import { Box, Typography, Paper, CircularProgress, Fade } from '@mui/material';
+import { Box, Typography, Paper, CircularProgress, Fade, Button } from '@mui/material';
+import { PhotoCamera as CameraIcon } from '@mui/icons-material';
 import { getFaceDescriptor, isModelsLoaded, loadModels } from '../services/faceRecognition';
 import * as faceapi from '@vladmandic/face-api';
 
-const FaceCapture = ({ onCapture }) => {
+const FaceCapture = ({ onCapture, autoCapture = true, autoStart = true }) => {
     const webcamRef = useRef(null);
     const [processing, setProcessing] = useState(false);
     const [status, setStatus] = useState('Iniciando biometria...');
@@ -12,6 +13,7 @@ const FaceCapture = ({ onCapture }) => {
     const [captured, setCaptured] = useState(false);
     const [detectionProgress, setDetectionProgress] = useState(0);
     const [countdown, setCountdown] = useState(null);
+    const [cameraActive, setCameraActive] = useState(autoStart);
 
     // Carregamento e Monitoramento dos modelos
     useEffect(() => {
@@ -53,9 +55,32 @@ const FaceCapture = ({ onCapture }) => {
         }
     }, [onCapture, captured]);
 
+    const captureImage = useCallback(() => {
+        if (!webcamRef.current) return;
+        setStatus('📸 Capturando...');
+        const imageSrc = webcamRef.current.getScreenshot();
+        if (imageSrc) {
+            const img = new Image();
+            img.src = imageSrc;
+            img.onload = () => {
+                const canvas = document.createElement('canvas');
+                const size = 500; // Aumentado para melhor qualidade
+                canvas.width = size;
+                canvas.height = size;
+                const ctx = canvas.getContext('2d');
+                const minDim = Math.min(img.width, img.height);
+                const sx = (img.width - minDim) / 2;
+                const sy = (img.height - minDim) / 2;
+                ctx.drawImage(img, sx, sy, minDim, minDim, 0, 0, size, size);
+                const optimizedImage = canvas.toDataURL('image/jpeg', 0.85);
+                handleCapture(canvas, optimizedImage);
+            };
+        }
+    }, [handleCapture]);
+
     // Loop de Detecção Automática
     useEffect(() => {
-        if (!modelsReady || captured || processing) return;
+        if (!modelsReady || captured || processing || !cameraActive) return;
 
         let frameId;
         let countdownTimer;
@@ -76,8 +101,8 @@ const FaceCapture = ({ onCapture }) => {
                 if (detection && detection.score > 0.8) {
                     setDetectionProgress(prev => Math.min(100, prev + 15));
                     
-                    // Iniciar contagem regressiva se estiver estável
-                    if (detectionProgress >= 100 && countdown === null) {
+                    // Iniciar contagem regressiva se estiver estável (Apenas em modo automático)
+                    if (autoCapture && detectionProgress >= 100 && countdown === null) {
                         setCountdown(3);
                     }
                 } else {
@@ -100,25 +125,7 @@ const FaceCapture = ({ onCapture }) => {
             }, 1000);
         } else if (countdown === 0) {
             // Fim da contagem: Dispara captura
-            setStatus('📸 Capturando...');
-            const imageSrc = webcamRef.current.getScreenshot();
-            if (imageSrc) {
-                const img = new Image();
-                img.src = imageSrc;
-                img.onload = () => {
-                    const canvas = document.createElement('canvas');
-                    const size = 500; // Aumentado para melhor qualidade
-                    canvas.width = size;
-                    canvas.height = size;
-                    const ctx = canvas.getContext('2d');
-                    const minDim = Math.min(img.width, img.height);
-                    const sx = (img.width - minDim) / 2;
-                    const sy = (img.height - minDim) / 2;
-                    ctx.drawImage(img, sx, sy, minDim, minDim, 0, 0, size, size);
-                    const optimizedImage = canvas.toDataURL('image/jpeg', 0.85);
-                    handleCapture(canvas, optimizedImage);
-                };
-            }
+            captureImage();
             setCountdown(null); // Finaliza o fluxo
             return; 
         }
@@ -128,7 +135,7 @@ const FaceCapture = ({ onCapture }) => {
             cancelAnimationFrame(frameId);
             if (countdownTimer) clearTimeout(countdownTimer);
         };
-    }, [modelsReady, captured, processing, detectionProgress, countdown, handleCapture]);
+    }, [modelsReady, captured, processing, detectionProgress, countdown, captureImage, cameraActive, autoCapture]);
 
     return (
         <Paper variant="outlined" sx={{ 
@@ -141,62 +148,102 @@ const FaceCapture = ({ onCapture }) => {
             position: 'relative',
             overflow: 'hidden'
         }}>
-            <Box sx={{ position: 'relative', display: 'inline-block', lineHeight: 0, mb: 2 }}>
-                <Webcam
-                    audio={false}
-                    ref={webcamRef}
-                    screenshotFormat="image/jpeg"
-                    videoConstraints={{ width: 640, height: 480, facingMode: "user" }}
-                    style={{ 
-                        borderRadius: '24px', 
-                        width: '100%', 
-                        maxWidth: '320px',
-                        transform: 'scaleX(-1)', // Mirror effect
-                        border: captured ? '4px solid #4caf50' : '4px solid #f0f0f0',
-                        transition: 'border 0.3s ease'
-                    }}
-                />
-                
-                {/* Overlay de Progresso circular */}
-                {!captured && (
+            <Box sx={{ position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center', mb: 2 }}>
+                {cameraActive ? (
+                    <Box sx={{ position: 'relative', lineHeight: 0 }}>
+                        <Webcam
+                            audio={false}
+                            ref={webcamRef}
+                            screenshotFormat="image/jpeg"
+                            videoConstraints={{ width: 640, height: 480, facingMode: "user" }}
+                            style={{ 
+                                borderRadius: '24px', 
+                                width: '100%', 
+                                maxWidth: '320px',
+                                transform: 'scaleX(-1)', // Mirror effect
+                                border: captured ? '4px solid #4caf50' : '4px solid #f0f0f0',
+                                transition: 'border 0.3s ease'
+                            }}
+                        />
+                        
+                        {/* Overlay de Progresso circular e Contagem */}
+                        {!captured && (
+                            <Box sx={{ 
+                                position: 'absolute', 
+                                top: '50%', 
+                                left: '50%', 
+                                transform: 'translate(-50%, -50%)',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                pointerEvents: 'none',
+                                zIndex: 10,
+                                width: 200,
+                                height: 200
+                            }}>
+                                <CircularProgress
+                                    variant="determinate"
+                                    value={detectionProgress}
+                                    size={200}
+                                    thickness={2}
+                                    sx={{ color: '#4caf50', opacity: 0.4, position: 'absolute' }}
+                                />
+                                
+                                {countdown !== null && (
+                                    <Typography 
+                                        variant="h1" 
+                                        sx={{ 
+                                            fontWeight: 900,
+                                            color: '#fff',
+                                            textShadow: '0 4px 20px rgba(0,0,0,0.4)',
+                                            animation: 'pulse 1s infinite',
+                                            m: 0,
+                                            lineHeight: 1,
+                                            zIndex: 11
+                                        }}
+                                    >
+                                        {countdown > 0 ? countdown : '📸'}
+                                    </Typography>
+                                )}
+                            </Box>
+                        )}
+                    </Box>
+                ) : (
                     <Box sx={{ 
-                        position: 'absolute', 
-                        top: '50%', 
-                        left: '50%', 
-                        transform: 'translate(-50%, -50%)',
+                        width: '100%', 
+                        maxWidth: '320px', 
+                        height: 240, 
+                        bgcolor: '#f8fafc', 
+                        borderRadius: '24px',
                         display: 'flex',
                         flexDirection: 'column',
                         alignItems: 'center',
-                        pointerEvents: 'none',
-                        zIndex: 10
+                        justifyContent: 'center',
+                        border: '2px dashed #ccc'
                     }}>
-                        <CircularProgress
-                            variant="determinate"
-                            value={detectionProgress}
-                            size={200}
-                            thickness={2}
-                            sx={{ color: '#4caf50', opacity: 0.4 }}
-                        />
-                        
-                        {/* Contagem Regressiva Visual */}
-                        {countdown !== null && (
-                            <Typography 
-                                variant="h1" 
-                                sx={{ 
-                                    position: 'absolute',
-                                    top: '50%',
-                                    left: '50%',
-                                    transform: 'translate(-50%, -50%)',
-                                    fontWeight: 900,
-                                    color: '#fff',
-                                    textShadow: '0 4px 20px rgba(0,0,0,0.4)',
-                                    animation: 'pulse 1s infinite'
-                                }}
-                            >
-                                {countdown > 0 ? countdown : '📸'}
-                            </Typography>
-                        )}
+                        <CameraIcon sx={{ fontSize: 48, color: '#ccc', mb: 2 }} />
+                        <Button 
+                            variant="contained" 
+                            onClick={() => setCameraActive(true)}
+                            sx={{ bgcolor: '#1b5e20', '&:hover': { bgcolor: '#144616' } }}
+                        >
+                            Ativar Câmera
+                        </Button>
                     </Box>
+                )}
+                
+                {/* Botão de Captura Manual */}
+                {!autoCapture && cameraActive && !captured && !processing && (
+                    <Button 
+                        variant="contained" 
+                        color="success" 
+                        onClick={captureImage}
+                        disabled={detectionProgress < 50}
+                        sx={{ mt: 2, borderRadius: 2, fontWeight: 'bold', px: 4 }}
+                        startIcon={<CameraIcon />}
+                    >
+                        {detectionProgress < 50 ? 'Centralize para Capturar' : 'Capturar Agora'}
+                    </Button>
                 )}
                 
                 {processing && (

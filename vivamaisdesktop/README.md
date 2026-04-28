@@ -1,4 +1,4 @@
-# 🏥 VivaMais - Painel Administrativo Web
+# 🏥 Vida Mais - Painel Administrativo Web
 
 Sistema de gestão para pesquisa de satisfação e monitoramento de serviços para idosos. Permite gerenciar questionários, usuários, visualizar estatísticas em tempo real, exportar relatórios em Excel e gerar insights com Inteligência Artificial.
 

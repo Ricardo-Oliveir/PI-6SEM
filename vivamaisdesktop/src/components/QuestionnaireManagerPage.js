@@ -5,7 +5,7 @@ import {
     Dialog, DialogTitle, DialogContent, DialogActions, TextField,
     Select, MenuItem, FormControl, InputLabel, IconButton, Chip,
     CircularProgress, Snackbar, Alert, Tooltip, List, ListItem, ListItemText, Divider,
-    Paper, LinearProgress, Stack, Drawer
+    Paper, LinearProgress, Stack, Drawer, Table, TableHead, TableBody, TableRow, TableCell
 } from '@mui/material';
 import {
     Add as AddIcon,
@@ -36,7 +36,7 @@ function QuestionnaireManagerPage() {
     const [openAddQuestionModal, setOpenAddQuestionModal] = useState(false);
     const [openViewQuestionsModal, setOpenViewQuestionsModal] = useState(false);
     const [activeTab, setActiveTab] = useState('Todas');
-    const [openQuickViewModal, setOpenQuickViewModal] = useState(false);
+    // const [openQuickViewModal, setOpenQuickViewModal] = useState(false);
     const [openResultsDrawer, setOpenResultsDrawer] = useState(false);
     const [quickStats, setQuickStats] = useState({ total: 0, average: null, topAnswers: [], participation: 0 });
     const [loadingQuickView, setLoadingQuickView] = useState(false);
@@ -260,7 +260,7 @@ function QuestionnaireManagerPage() {
         <Box>
             <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 2, flexDirection: { xs: 'column', md: 'row' }, mb: 4 }}>
                 <Box>
-                    <Typography variant="h4" sx={{ mb: 0.75 }}>Gestão de Pesquisas</Typography>
+                    <Typography variant="h4" sx={{ mb: 0.75, fontWeight: 800, color: brand.primary }}>Gestão de Pesquisas</Typography>
                     <Typography sx={{ color: 'text.secondary' }}>
                         Monitore, analise e gerencie suas campanhas ativas de feedback.
                     </Typography>
@@ -344,125 +344,184 @@ function QuestionnaireManagerPage() {
                         <CircularProgress sx={{ color: brand.primary }} />
                     </Box>
                 ) : (
-                    <Box sx={{ overflowX: 'auto' }}>
-                        {questionnaires
-                            .filter(q => {
-                                if (activeTab === 'Todas') return true;
-                                if (activeTab === 'Ativas') return q.status === 'active';
-                                if (activeTab === 'Concluídas') return q.status === 'finished';
-                                if (activeTab === 'Rascunhos') return q.status === 'draft';
-                                return true;
-                            })
-                            .map((q) => {
-                            const totalQuestions = q.questions?.length || 0;
-                            const status = q.status || (q.is_active === false ? 'finished' : 'active');
-                            const responseProgress = Math.min(100, totalQuestions * 12 + (status === 'active' ? 20 : 8));
-                            return (
-                                <Paper
-                                    key={q.id}
-                                    elevation={0}
-                                    sx={{
-                                        px: 3,
-                                        py: 2.5,
-                                        borderBottom: `1px solid ${brand.line}`,
-                                        borderRadius: 0,
-                                        '&:hover': { backgroundColor: 'rgba(248,249,250,0.9)' }
-                                    }}
-                                >
-                                    <Grid container spacing={2} alignItems="center">
-                                        <Grid item xs={12} md={3}>
-                                            <Typography sx={{ fontWeight: 800 }}>{q.title}</Typography>
-                                            <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>
-                                                ID: {q.id}
-                                            </Typography>
-                                        </Grid>
-                                        <Grid item xs={6} md={1.5}>
-                                            <Chip
-                                                label={status === 'active' ? 'Ativa' : status === 'draft' ? 'Rascunho' : 'Concluída'}
-                                                size="small"
-                                                sx={{
-                                                    bgcolor: status === 'active' ? 'rgba(46,125,50,0.10)' : status === 'draft' ? 'rgba(100,100,100,0.10)' : 'rgba(211,47,47,0.10)',
-                                                    color: status === 'active' ? '#2E7D32' : status === 'draft' ? '#666' : '#D32F2F',
-                                                    fontWeight: 800
-                                                }}
-                                            />
-                                        </Grid>
-                                        <Grid item xs={6} md={2}>
-                                            <Typography sx={{ color: 'text.secondary', fontSize: 14 }}>
-                                                {q.created_at ? new Date(q.created_at).toLocaleDateString('pt-BR') : 'Sem data'}
-                                            </Typography>
-                                        </Grid>
-                                        <Grid item xs={12} md={3}>
-                                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-                                                <Box sx={{ flex: 1 }}>
-                                                    <LinearProgress
-                                                        variant="determinate"
-                                                        value={responseProgress}
-                                                        sx={{
-                                                            height: 8,
-                                                            borderRadius: 999,
-                                                            backgroundColor: 'rgba(69,90,100,0.08)',
-                                                            '& .MuiLinearProgress-bar': {
-                                                                backgroundColor: brand.secondary,
-                                                                borderRadius: 999
-                                                            }
-                                                        }}
-                                                    />
+                    <Box sx={{ p: 0 }}>
+                        {/* Versão Desktop (Tabela Única) */}
+                        <Box sx={{ display: { xs: 'none', md: 'block' } }}>
+                            <Table>
+                                <TableHead sx={{ bgcolor: 'rgba(0,0,0,0.02)' }}>
+                                    <TableRow>
+                                        <TableCell sx={{ fontWeight: 800, color: 'text.secondary' }}>Título / ID</TableCell>
+                                        <TableCell sx={{ fontWeight: 800, color: 'text.secondary', width: 150 }}>Status</TableCell>
+                                        <TableCell sx={{ fontWeight: 800, color: 'text.secondary', width: 120 }}>Data</TableCell>
+                                        <TableCell sx={{ fontWeight: 800, color: 'text.secondary', width: 200 }}>Engajamento</TableCell>
+                                        <TableCell align="right" sx={{ fontWeight: 800, color: 'text.secondary' }}>Ações</TableCell>
+                                    </TableRow>
+                                </TableHead>
+                                <TableBody>
+                                    {questionnaires
+                                        .filter(q => {
+                                            if (activeTab === 'Todas') return true;
+                                            if (activeTab === 'Ativas') return q.status === 'active';
+                                            if (activeTab === 'Concluídas') return q.status === 'finished';
+                                            if (activeTab === 'Rascunhos') return q.status === 'draft';
+                                            return true;
+                                        })
+                                        .map((q) => {
+                                            const totalQuestions = q.questions?.length || 0;
+                                            const status = q.status || (q.is_active === false ? 'finished' : 'active');
+                                            const responseProgress = q.engagement_rate || 0;
+                                            return (
+                                                <TableRow 
+                                                    key={q.id} 
+                                                    hover 
+                                                    sx={{ 
+                                                        '& .MuiTableCell-root': { py: 2.5, borderBottom: `1px solid ${brand.line}` }
+                                                    }}
+                                                >
+                                                    <TableCell>
+                                                        <Typography sx={{ fontWeight: 800, fontSize: '1rem' }}>{q.title}</Typography>
+                                                        <Typography sx={{ fontSize: 11, color: 'text.secondary' }}>ID: {q.id}</Typography>
+                                                    </TableCell>
+                                                    <TableCell>
+                                                        <Chip
+                                                            label={status === 'active' ? 'Ativa' : status === 'draft' ? 'Rascunho' : 'Concluída'}
+                                                            size="small"
+                                                            sx={{
+                                                                width: '100%',
+                                                                bgcolor: status === 'active' ? 'rgba(46,125,50,0.10)' : status === 'draft' ? 'rgba(100,100,100,0.10)' : 'rgba(211,47,47,0.10)',
+                                                                color: status === 'active' ? '#2E7D32' : status === 'draft' ? '#666' : '#D32F2F',
+                                                                fontWeight: 800
+                                                            }}
+                                                        />
+                                                    </TableCell>
+                                                    <TableCell>
+                                                        <Typography sx={{ color: 'text.secondary', fontSize: 13 }}>
+                                                            {q.created_at ? new Date(q.created_at).toLocaleDateString('pt-BR') : 'Sem data'}
+                                                        </Typography>
+                                                    </TableCell>
+                                                    <TableCell>
+                                                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+                                                            <Box sx={{ flex: 1 }}>
+                                                                <LinearProgress
+                                                                    variant="determinate"
+                                                                    value={responseProgress}
+                                                                    sx={{
+                                                                        height: 6,
+                                                                        borderRadius: 9,
+                                                                        backgroundColor: 'rgba(69,90,100,0.08)',
+                                                                        '& .MuiLinearProgress-bar': { backgroundColor: brand.secondary, borderRadius: 9 }
+                                                                    }}
+                                                                />
+                                                            </Box>
+                                                            <Typography sx={{ fontWeight: 800, minWidth: 35, fontSize: 12 }}>{responseProgress}%</Typography>
+                                                        </Box>
+                                                    </TableCell>
+                                                    <TableCell align="right">
+                                                        <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 0.5 }}>
+                                                            {status === 'draft' && (
+                                                                <Tooltip title="Publicar">
+                                                                    <IconButton onClick={() => handleUpdateStatus(q.id, 'active')} color="success" size="small"><PublishIcon fontSize="small" /></IconButton>
+                                                                </Tooltip>
+                                                            )}
+                                                            {status === 'active' && (
+                                                                <Tooltip title="Finalizar">
+                                                                    <IconButton onClick={() => handleUpdateStatus(q.id, 'finished')} color="error" size="small"><FinishIcon fontSize="small" /></IconButton>
+                                                                </Tooltip>
+                                                            )}
+                                                            {status === 'finished' && (
+                                                                <Tooltip title="Reabrir">
+                                                                    <IconButton onClick={() => handleUpdateStatus(q.id, 'active')} color="success" size="small"><PublishIcon fontSize="small" /></IconButton>
+                                                                </Tooltip>
+                                                            )}
+                                                            <IconButton onClick={() => handleOpenQuickView(q)} size="small" sx={{ color: brand.secondary }}><ChartIcon fontSize="small" /></IconButton>
+                                                            <IconButton onClick={() => handleViewQuestions(q)} size="small" sx={{ color: brand.primary }}><ViewIcon fontSize="small" /></IconButton>
+                                                            <IconButton onClick={() => handleExportExcel(q)} disabled={downloading} size="small" sx={{ color: '#F57C00' }}>
+                                                                {downloading ? <CircularProgress size={16} /> : <DownloadIcon fontSize="small" />}
+                                                            </IconButton>
+                                                            <IconButton onClick={() => handleOpenAddQuestion(q)} size="small" sx={{ color: brand.primary }}><AddPlusIcon fontSize="small" /></IconButton>
+                                                            <IconButton onClick={() => handleDelete(q.id)} size="small" sx={{ color: '#c54848' }}><DeleteIcon fontSize="small" /></IconButton>
+                                                        </Box>
+                                                    </TableCell>
+                                                </TableRow>
+                                            );
+                                        })}
+                                </TableBody>
+                            </Table>
+                        </Box>
+
+                        {/* Versão Mobile (Cards - Mantida) */}
+                        <Box sx={{ display: { xs: 'block', md: 'none' } }}>
+                            {questionnaires
+                                .filter(q => {
+                                    if (activeTab === 'Todas') return true;
+                                    if (activeTab === 'Ativas') return q.status === 'active';
+                                    if (activeTab === 'Concluídas') return q.status === 'finished';
+                                    if (activeTab === 'Rascunhos') return q.status === 'draft';
+                                    return true;
+                                })
+                                .map((q) => {
+                                    const totalQuestions = q.questions?.length || 0;
+                                    const status = q.status || (q.is_active === false ? 'finished' : 'active');
+                                    const responseProgress = q.engagement_rate || 0;
+                                    return (
+                                        <Paper
+                                            key={q.id}
+                                            elevation={0}
+                                            sx={{
+                                                px: 2,
+                                                py: 2.5,
+                                                borderBottom: `1px solid ${brand.line}`,
+                                                borderRadius: 0,
+                                                '&:hover': { backgroundColor: 'rgba(248,249,250,0.9)' }
+                                            }}
+                                        >
+                                            <Box sx={{ mb: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                                                <Box>
+                                                    <Typography sx={{ fontWeight: 800 }}>{q.title}</Typography>
+                                                    <Typography sx={{ fontSize: 11, color: 'text.secondary' }}>ID: {q.id}</Typography>
                                                 </Box>
-                                                <Typography sx={{ fontWeight: 800, minWidth: 42 }}>
-                                                    {responseProgress}%
-                                                </Typography>
+                                                <Chip
+                                                    label={status === 'active' ? 'Ativa' : status === 'draft' ? 'Rascunho' : 'Concluída'}
+                                                    size="small"
+                                                    sx={{
+                                                        bgcolor: status === 'active' ? 'rgba(46,125,50,0.10)' : status === 'draft' ? 'rgba(100,100,100,0.10)' : 'rgba(211,47,47,0.10)',
+                                                        color: status === 'active' ? '#2E7D32' : status === 'draft' ? '#666' : '#D32F2F',
+                                                        fontWeight: 800
+                                                    }}
+                                                />
                                             </Box>
-                                        </Grid>
-                                        <Grid item xs={12} md={3}>
-                                            <Box sx={{ display: 'flex', justifyContent: { xs: 'flex-start', md: 'flex-end' }, gap: 1 }}>
+                                            <Box sx={{ mb: 2 }}>
+                                                <Typography sx={{ color: 'text.secondary', fontSize: 12 }}>Criado em: {q.created_at ? new Date(q.created_at).toLocaleDateString('pt-BR') : 'Sem data'}</Typography>
+                                            </Box>
+                                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 2 }}>
+                                                <Box sx={{ flex: 1 }}>
+                                                    <LinearProgress variant="determinate" value={responseProgress} sx={{ height: 6, borderRadius: 9, backgroundColor: 'rgba(69,90,100,0.08)', '& .MuiLinearProgress-bar': { backgroundColor: brand.secondary, borderRadius: 9 } }} />
+                                                </Box>
+                                                <Typography sx={{ fontWeight: 800, minWidth: 35, fontSize: 12 }}>{responseProgress}%</Typography>
+                                            </Box>
+                                            <Box sx={{ display: 'flex', justifyContent: 'center', gap: 0.5, flexWrap: 'wrap' }}>
                                                 {status === 'draft' && (
-                                                    <Tooltip title="Publicar Pesquisa">
-                                                        <IconButton onClick={() => handleUpdateStatus(q.id, 'active')} color="success">
-                                                            <PublishIcon />
-                                                        </IconButton>
-                                                    </Tooltip>
+                                                    <IconButton onClick={() => handleUpdateStatus(q.id, 'active')} color="success" size="small"><PublishIcon fontSize="small" /></IconButton>
                                                 )}
                                                 {status === 'active' && (
-                                                    <Tooltip title="Finalizar Pesquisa">
-                                                        <IconButton onClick={() => handleUpdateStatus(q.id, 'finished')} color="error">
-                                                            <FinishIcon />
-                                                        </IconButton>
-                                                    </Tooltip>
+                                                    <IconButton onClick={() => handleUpdateStatus(q.id, 'finished')} color="error" size="small"><FinishIcon fontSize="small" /></IconButton>
                                                 )}
-                                                <Tooltip title="Insights e Resultados">
-                                                    <IconButton onClick={() => handleOpenQuickView(q)}>
-                                                        <ChartIcon sx={{ color: brand.secondary }} />
-                                                    </IconButton>
-                                                </Tooltip>
-                                                <Tooltip title="Ver perguntas">
-                                                    <IconButton onClick={() => handleViewQuestions(q)}>
-                                                        <ViewIcon sx={{ color: brand.primary }} />
-                                                    </IconButton>
-                                                </Tooltip>
-                                                <Tooltip title="Baixar Excel">
-                                                    <IconButton onClick={() => handleExportExcel(q)} disabled={downloading}>
-                                                        {downloading ? <CircularProgress size={18} /> : <DownloadIcon sx={{ color: '#F57C00' }} />}
-                                                    </IconButton>
-                                                </Tooltip>
-                                                <Tooltip title="Adicionar pergunta">
-                                                    <IconButton onClick={() => handleOpenAddQuestion(q)}>
-                                                        <AddPlusIcon sx={{ color: brand.primary }} />
-                                                    </IconButton>
-                                                </Tooltip>
-                                                <Tooltip title="Excluir">
-                                                    <IconButton onClick={() => handleDelete(q.id)}>
-                                                        <DeleteIcon sx={{ color: '#c54848' }} />
-                                                    </IconButton>
-                                                </Tooltip>
+                                                {status === 'finished' && (
+                                                    <IconButton onClick={() => handleUpdateStatus(q.id, 'active')} color="success" size="small"><PublishIcon fontSize="small" /></IconButton>
+                                                )}
+                                                <IconButton onClick={() => handleOpenQuickView(q)} size="small" sx={{ color: brand.secondary }}><ChartIcon fontSize="small" /></IconButton>
+                                                <IconButton onClick={() => handleViewQuestions(q)} size="small" sx={{ color: brand.primary }}><ViewIcon fontSize="small" /></IconButton>
+                                                <IconButton onClick={() => handleExportExcel(q)} disabled={downloading} size="small" sx={{ color: '#F57C00' }}><DownloadIcon fontSize="small" /></IconButton>
+                                                <IconButton onClick={() => handleOpenAddQuestion(q)} size="small" sx={{ color: brand.primary }}><AddPlusIcon fontSize="small" /></IconButton>
+                                                <IconButton onClick={() => handleDelete(q.id)} size="small" sx={{ color: '#c54848' }}><DeleteIcon fontSize="small" /></IconButton>
                                             </Box>
-                                        </Grid>
-                                    </Grid>
-                                </Paper>
-                            );
-                        })}
+                                        </Paper>
+                                    );
+                                })}
+                        </Box>
                     </Box>
                 )}
+
             </Card>
 
             <Dialog open={openViewQuestionsModal} onClose={() => setOpenViewQuestionsModal(false)} fullWidth maxWidth="md">

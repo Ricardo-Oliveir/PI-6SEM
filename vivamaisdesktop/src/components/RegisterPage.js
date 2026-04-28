@@ -43,7 +43,7 @@ function RegisterPage() {
 
         try {
             const username = generateUsername(fullName);
-            const email = `${username}@vivamais.com`;
+            const email = `${username}@vidamais.com`;
 
             await api.post('/auth/register', {
                 username,
@@ -117,7 +117,7 @@ function RegisterPage() {
                     <img src={logo} alt="Logo" style={{ width: '56px' }} />
                 </Box>
 
-                <Typography variant="h4" sx={{ mb: 1 }}>
+                <Typography variant="h4" sx={{ mb: 1, fontSize: { xs: '1.5rem', md: '2.125rem' }, fontWeight: 800 }}>
                     Criar acesso ao painel
                 </Typography>
                 <Typography sx={{ color: 'text.secondary', mb: 4 }}>

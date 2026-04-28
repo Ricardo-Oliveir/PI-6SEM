@@ -2,8 +2,8 @@
 import axios from 'axios';
 
 const getApiBaseUrl = () => {
-    // Endereço absoluto oficial com prefixo /api
-    return 'https://api-jzao6okpha-uc.a.run.app/api';
+    // Usa a variável de ambiente se disponível, senão usa o padrão de produção
+    return process.env.REACT_APP_API_URL || 'https://api-jzao6okpha-uc.a.run.app/api';
 };
 
 const API_BASE_URL = getApiBaseUrl();
