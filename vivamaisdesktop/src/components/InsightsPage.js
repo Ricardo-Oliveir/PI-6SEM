@@ -3,7 +3,8 @@ import {
     Box, Typography, Grid, Card, CardContent, Button,
     Select, MenuItem, FormControl, InputLabel, CircularProgress,
     Divider, Alert, Chip, Accordion, AccordionSummary,
-    AccordionDetails, Paper, List, ListItem, ListItemIcon, ListItemText
+    AccordionDetails, Paper, List, ListItem, ListItemIcon, ListItemText,
+    Snackbar
 } from '@mui/material';
 import {
     AutoAwesome as AiIcon,
@@ -30,6 +31,7 @@ function InsightsPage() {
     const [detailedAnalysis, setDetailedAnalysis] = useState(null);
     const [stats, setStats] = useState(null);
     const [source, setSource] = useState(null);
+    const [error, setError] = useState(null);
 
     useEffect(() => {
         api.get('/questionnaires').then((res) => setQuestionnaires(res.data));
@@ -42,18 +44,31 @@ function InsightsPage() {
         setDetailedAnalysis(null);
         setStats(null);
         setSource(null);
+        setError(null);
 
         try {
             const response = await api.post('/generate-insights', { questionnaireId: selectedQ });
-            setTimeout(() => {
+            
+            if (response.data.success) {
                 setInsights(response.data.analysis);
                 setDetailedAnalysis(response.data.detailed);
                 setStats(response.data.stats);
                 setSource(response.data.source);
-                setLoading(false);
-            }, 500);
-        } catch (error) {
-            console.error(error);
+                
+                // Se a IA falhou e usou fallback, mostramos o erro no estado de erro para visibilidade
+                if (response.data.aiError) {
+                    setError(`Aviso da IA: ${response.data.aiError}`);
+                } else if (response.data.message && response.data.message !== "Sucesso") {
+                    console.log('Server Message:', response.data.message);
+                }
+            } else {
+                setError(response.data.message || response.data.error || 'Erro ao gerar análise.');
+            }
+        } catch (err) {
+            console.error('Insights Error:', err);
+            const serverMessage = err.response?.data?.error || err.response?.data?.details || err.message;
+            setError(`Falha crítica: ${serverMessage}`);
+        } finally {
             setLoading(false);
         }
     };
@@ -74,7 +89,7 @@ function InsightsPage() {
     const topStats = stats ? [
         { label: 'Respondentes', value: stats.totalRespondents, icon: <PeopleIcon />, gradient: gradients.mint },
         { label: 'Respostas totais', value: stats.totalResponses, icon: <AssessmentIcon />, gradient: gradients.violet },
-        { label: 'Média geral', value: stats.overallAverage || detailedAnalysis?.metricas_chave?.satisfacao_geral || 'N/A', icon: <SpeedIcon />, gradient: gradients.cool }
+        { label: 'Feedback Positivo', value: stats.positiveRate || 'N/A', icon: <StrongIcon />, gradient: gradients.cool }
     ] : [];
 
     return (
@@ -275,6 +290,17 @@ function InsightsPage() {
                     </CardContent>
                 </Card>
             )}
+
+            <Snackbar 
+                open={!!error} 
+                autoHideDuration={6000} 
+                onClose={() => setError(null)}
+                anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+            >
+                <Alert onClose={() => setError(null)} severity="error" sx={{ width: '100%', borderRadius: 3 }}>
+                    {error}
+                </Alert>
+            </Snackbar>
         </Box>
     );
 }

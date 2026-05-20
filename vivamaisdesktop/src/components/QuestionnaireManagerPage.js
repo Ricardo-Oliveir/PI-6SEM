@@ -10,6 +10,7 @@ import {
 import {
     Add as AddIcon,
     Delete as DeleteIcon,
+    Edit as EditIcon,
     AddCircle as AddPlusIcon,
     Download as DownloadIcon,
     Visibility as ViewIcon,
@@ -34,6 +35,7 @@ function QuestionnaireManagerPage() {
     const [downloading, setDownloading] = useState(false);
     const [openCreateModal, setOpenCreateModal] = useState(false);
     const [openAddQuestionModal, setOpenAddQuestionModal] = useState(false);
+    const [openEditQuestionModal, setOpenEditQuestionModal] = useState(false);
     const [openViewQuestionsModal, setOpenViewQuestionsModal] = useState(false);
     const [activeTab, setActiveTab] = useState('Todas');
     // const [openQuickViewModal, setOpenQuickViewModal] = useState(false);
@@ -43,11 +45,18 @@ function QuestionnaireManagerPage() {
     const [title, setTitle] = useState('');
     const [description, setDescription] = useState('');
     const [selectedQ, setSelectedQ] = useState(null);
+    const [editingQuestionId, setEditingQuestionId] = useState(null);
     const [qText, setQText] = useState('');
     const [qType, setQType] = useState('multiple_choice');
     const [options, setOptions] = useState(['']);
     const [savingQuestion, setSavingQuestion] = useState(false);
     const [toast, setToast] = useState({ open: false, msg: '', type: 'success' });
+    const [openEditQModal, setOpenEditQModal] = useState(false);
+    const [editQId, setEditQId] = useState('');
+    const [editTitle, setEditTitle] = useState('');
+    const [editDescription, setEditDescription] = useState('');
+    const [editGoal, setEditGoal] = useState(80);
+    const [engagementGoalInput, setEngagementGoalInput] = useState(80);
 
     const loadData = useCallback(async () => {
         try {
@@ -69,7 +78,7 @@ function QuestionnaireManagerPage() {
     const handleExportExcel = async (questionnaire) => {
         setDownloading(true);
         try {
-            const qDetails = await api.get(`/api/questionnaires/${questionnaire.id}`);
+            const qDetails = await api.get(`/questionnaires/${questionnaire.id}`);
             const questionsMap = {};
             if (qDetails.data.questions) {
                 qDetails.data.questions.forEach((q) => {
@@ -186,8 +195,18 @@ function QuestionnaireManagerPage() {
     const handleOpenAddQuestion = (q) => {
         setSelectedQ(q);
         setQText('');
+        setQType('multiple_choice');
         setOptions(['']);
         setOpenAddQuestionModal(true);
+    };
+
+    const handleOpenEditQuestion = (q, question) => {
+        setSelectedQ(q);
+        setEditingQuestionId(question.id);
+        setQText(question.text);
+        setQType(question.type);
+        setOptions(question.options || ['']);
+        setOpenEditQuestionModal(true);
     };
 
     const handleSaveQuestion = async () => {
@@ -211,17 +230,53 @@ function QuestionnaireManagerPage() {
         }
     };
 
+    const handleUpdateQuestion = async () => {
+        if (!qText.trim()) return showToast('Digite a pergunta', 'warning');
+        setSavingQuestion(true);
+        try {
+            await api.put(`/questionnaires/${selectedQ.id}/questions/${editingQuestionId}`, {
+                text: qText,
+                type: qType,
+                options: qType === 'multiple_choice' ? options.filter((o) => o.trim()) : null
+            });
+            showToast('Pergunta atualizada!', 'success');
+            setOpenEditQuestionModal(false);
+            // Atualizar o objeto selectedQ localmente para refletir a mudança sem recarregar tudo se possível, 
+            // mas loadData() é mais seguro
+            loadData();
+            
+            // Opcional: Atualizar o selectedQ para que o modal de visualização mostre a mudança
+            const updatedQ = { ...selectedQ };
+            const qIdx = updatedQ.questions.findIndex(q => q.id === editingQuestionId);
+            if (qIdx !== -1) {
+                updatedQ.questions[qIdx] = { 
+                    ...updatedQ.questions[qIdx], 
+                    text: qText, 
+                    type: qType, 
+                    options: qType === 'multiple_choice' ? options.filter((o) => o.trim()) : null 
+                };
+                setSelectedQ(updatedQ);
+            }
+        } catch (error) {
+            showToast('Erro ao atualizar pergunta', 'error');
+        } finally {
+            setSavingQuestion(false);
+        }
+    };
+
     const handleCreate = async () => {
         if (!title.trim()) return showToast('Título obrigatório', 'warning');
         try {
             await api.post('/questionnaires', {
                 title,
                 description,
+                engagement_goal: engagementGoalInput,
                 questions: [] // Garante que a estrutura chegue formatada pro Firebase Embedded
             });
             setOpenCreateModal(false);
             setTitle('');
             setDescription('');
+            setEngagementGoalInput(80);
             showToast('Questionário criado!', 'success');
             loadData();
         } catch (error) {
@@ -231,10 +286,35 @@ function QuestionnaireManagerPage() {
         }
     };
 
+    const handleOpenEditQuestionnaire = (q) => {
+        setEditQId(q.id);
+        setEditTitle(q.title);
+        setEditDescription(q.description || '');
+        setEditGoal(q.engagement_goal !== undefined ? q.engagement_goal : 80);
+        setOpenEditQModal(true);
+    };
+
+    const handleUpdateQuestionnaire = async () => {
+        if (!editTitle.trim()) return showToast('Título obrigatório', 'warning');
+        try {
+            await api.put(`/questionnaires/${editQId}`, {
+                title: editTitle,
+                description: editDescription,
+                engagement_goal: editGoal
+            });
+            showToast('Pesquisa atualizada!', 'success');
+            setOpenEditQModal(false);
+            loadData();
+        } catch (error) {
+            console.error('Erro ao atualizar pesquisa:', error);
+            showToast('Erro ao atualizar pesquisa', 'error');
+        }
+    };
+
     const handleDelete = async (id) => {
         if (!window.confirm('Tem certeza que deseja excluir?')) return;
         try {
-            await api.delete(`/api/questionnaires/${id}`);
+            await api.delete(`/questionnaires/${id}`);
             loadData();
             showToast('Questionário excluído!', 'success');
         } catch (error) {
@@ -287,17 +367,9 @@ function QuestionnaireManagerPage() {
                         color: '#2E7D32',
                         bg: 'rgba(46,125,50,0.08)',
                         trend: `${active}`
-                    },
-                    {
-                        label: 'Média de perguntas',
-                        value: averageQuestions,
-                        icon: <RateIcon />,
-                        color: '#F57C00',
-                        bg: 'rgba(245,124,0,0.10)',
-                        trend: 'média'
                     }
                 ].map((item, index) => (
-                    <Grid item xs={12} md={4} key={item.label}>
+                    <Grid item xs={12} md={6} key={item.label}>
                         <Card sx={{ ...fadeUp(70 * (index + 1)) }}>
                             <CardContent sx={{ p: 3 }}>
                                 <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 3 }}>
@@ -434,6 +506,9 @@ function QuestionnaireManagerPage() {
                                                                 </Tooltip>
                                                             )}
                                                             <IconButton onClick={() => handleOpenQuickView(q)} size="small" sx={{ color: brand.secondary }}><ChartIcon fontSize="small" /></IconButton>
+                                                            <Tooltip title="Editar Pesquisa">
+                                                                <IconButton onClick={() => handleOpenEditQuestionnaire(q)} size="small" sx={{ color: brand.primary }}><EditIcon fontSize="small" /></IconButton>
+                                                            </Tooltip>
                                                             <IconButton onClick={() => handleViewQuestions(q)} size="small" sx={{ color: brand.primary }}><ViewIcon fontSize="small" /></IconButton>
                                                             <IconButton onClick={() => handleExportExcel(q)} disabled={downloading} size="small" sx={{ color: '#F57C00' }}>
                                                                 {downloading ? <CircularProgress size={16} /> : <DownloadIcon fontSize="small" />}
@@ -510,6 +585,7 @@ function QuestionnaireManagerPage() {
                                                     <IconButton onClick={() => handleUpdateStatus(q.id, 'active')} color="success" size="small"><PublishIcon fontSize="small" /></IconButton>
                                                 )}
                                                 <IconButton onClick={() => handleOpenQuickView(q)} size="small" sx={{ color: brand.secondary }}><ChartIcon fontSize="small" /></IconButton>
+                                                <IconButton onClick={() => handleOpenEditQuestionnaire(q)} size="small" sx={{ color: brand.primary }}><EditIcon fontSize="small" /></IconButton>
                                                 <IconButton onClick={() => handleViewQuestions(q)} size="small" sx={{ color: brand.primary }}><ViewIcon fontSize="small" /></IconButton>
                                                 <IconButton onClick={() => handleExportExcel(q)} disabled={downloading} size="small" sx={{ color: '#F57C00' }}><DownloadIcon fontSize="small" /></IconButton>
                                                 <IconButton onClick={() => handleOpenAddQuestion(q)} size="small" sx={{ color: brand.primary }}><AddPlusIcon fontSize="small" /></IconButton>
@@ -533,7 +609,14 @@ function QuestionnaireManagerPage() {
                         <List>
                             {selectedQ.questions.map((question, index) => (
                                 <React.Fragment key={index}>
-                                    <ListItem alignItems="flex-start">
+                                    <ListItem 
+                                        alignItems="flex-start"
+                                        secondaryAction={
+                                            <IconButton edge="end" aria-label="edit" onClick={() => handleOpenEditQuestion(selectedQ, question)} color="primary">
+                                                <EditIcon />
+                                            </IconButton>
+                                        }
+                                    >
                                         <ListItemText
                                             primary={<Typography variant="h6" sx={{ fontWeight: 700 }}>{index + 1}. {question.text}</Typography>}
                                             secondary={
@@ -564,16 +647,30 @@ function QuestionnaireManagerPage() {
             </Dialog>
 
             <Dialog open={openCreateModal} onClose={() => setOpenCreateModal(false)} fullWidth maxWidth="sm">
-                <DialogTitle>Nova pesquisa</DialogTitle>
-                <DialogContent>
-                    <TextField autoFocus margin="dense" label="Título" fullWidth value={title} onChange={(e) => setTitle(e.target.value)} />
-                    <TextField margin="dense" label="Descrição" fullWidth multiline rows={3} value={description} onChange={(e) => setDescription(e.target.value)} />
-                </DialogContent>
-                <DialogActions>
-                    <Button onClick={() => setOpenCreateModal(false)}>Cancelar</Button>
-                    <Button onClick={handleCreate} variant="contained">Criar</Button>
-                </DialogActions>
-            </Dialog>
+                                <DialogTitle>Nova pesquisa</DialogTitle>
+                                <DialogContent>
+                                    <TextField autoFocus margin="dense" label="Título" fullWidth value={title} onChange={(e) => setTitle(e.target.value)} />
+                                    <TextField margin="dense" label="Descrição" fullWidth multiline rows={3} value={description} onChange={(e) => setDescription(e.target.value)} />
+                                    <TextField margin="dense" label="Meta de Engajamento (%)" type="number" fullWidth value={engagementGoalInput} onChange={(e) => setEngagementGoalInput(Number(e.target.value))} inputProps={{ min: 1, max: 100 }} />
+                                </DialogContent>
+                                <DialogActions>
+                                    <Button onClick={() => setOpenCreateModal(false)}>Cancelar</Button>
+                                    <Button onClick={handleCreate} variant="contained">Criar</Button>
+                                </DialogActions>
+                            </Dialog>
+
+                            <Dialog open={openEditQModal} onClose={() => setOpenEditQModal(false)} fullWidth maxWidth="sm">
+                                <DialogTitle>Editar pesquisa</DialogTitle>
+                                <DialogContent>
+                                    <TextField autoFocus margin="dense" label="Título" fullWidth value={editTitle} onChange={(e) => setEditTitle(e.target.value)} />
+                                    <TextField margin="dense" label="Descrição" fullWidth multiline rows={3} value={editDescription} onChange={(e) => setEditDescription(e.target.value)} />
+                                    <TextField margin="dense" label="Meta de Engajamento (%)" type="number" fullWidth value={editGoal} onChange={(e) => setEditGoal(Number(e.target.value))} inputProps={{ min: 1, max: 100 }} />
+                                </DialogContent>
+                                <DialogActions>
+                                    <Button onClick={() => setOpenEditQModal(false)}>Cancelar</Button>
+                                    <Button onClick={handleUpdateQuestionnaire} variant="contained" color="primary">Salvar Alterações</Button>
+                                </DialogActions>
+                            </Dialog>
 
             <Dialog open={openAddQuestionModal} onClose={() => setOpenAddQuestionModal(false)} fullWidth maxWidth="md">
                 <DialogTitle>Adicionar pergunta em: {selectedQ?.title}</DialogTitle>
@@ -583,7 +680,8 @@ function QuestionnaireManagerPage() {
                         <InputLabel>Tipo de resposta</InputLabel>
                         <Select value={qType} label="Tipo de resposta" onChange={(e) => setQType(e.target.value)}>
                             <MenuItem value="multiple_choice">Múltipla escolha</MenuItem>
-                            <MenuItem value="rating">Avaliação (1-5)</MenuItem>
+
+                            <MenuItem value="rating_10">Avaliação (1-10)</MenuItem>
                             <MenuItem value="yes_no">Sim / Não</MenuItem>
                             <MenuItem value="text">Texto livre</MenuItem>
                         </Select>
@@ -605,6 +703,41 @@ function QuestionnaireManagerPage() {
                     <Button onClick={() => setOpenAddQuestionModal(false)}>Cancelar</Button>
                     <Button onClick={handleSaveQuestion} variant="contained" disabled={savingQuestion}>
                         {savingQuestion ? 'Salvando...' : 'Adicionar'}
+                    </Button>
+                </DialogActions>
+            </Dialog>
+
+            <Dialog open={openEditQuestionModal} onClose={() => setOpenEditQuestionModal(false)} fullWidth maxWidth="md">
+                <DialogTitle>Editar pergunta em: {selectedQ?.title}</DialogTitle>
+                <DialogContent>
+                    <TextField margin="dense" label="Texto da pergunta" fullWidth value={qText} onChange={(e) => setQText(e.target.value)} sx={{ mb: 2 }} />
+                    <FormControl fullWidth sx={{ mb: 2 }}>
+                        <InputLabel>Tipo de resposta</InputLabel>
+                        <Select value={qType} label="Tipo de resposta" onChange={(e) => setQType(e.target.value)}>
+                            <MenuItem value="multiple_choice">Múltipla escolha</MenuItem>
+
+                            <MenuItem value="rating_10">Avaliação (1-10)</MenuItem>
+                            <MenuItem value="yes_no">Sim / Não</MenuItem>
+                            <MenuItem value="text">Texto livre</MenuItem>
+                        </Select>
+                    </FormControl>
+                    {qType === 'multiple_choice' && (
+                        <Box sx={{ bgcolor: 'rgba(27,94,32,0.04)', p: 2, borderRadius: 4 }}>
+                            <Typography variant="subtitle2" gutterBottom>Opções de resposta:</Typography>
+                            {options.map((opt, i) => (
+                                <Box key={i} sx={{ display: 'flex', mb: 1 }}>
+                                    <TextField fullWidth size="small" value={opt} onChange={(e) => handleOptionChange(i, e.target.value)} placeholder={`Opção ${i + 1}`} />
+                                    {options.length > 1 && <IconButton onClick={() => removeOpt(i)} color="error"><DeleteIcon /></IconButton>}
+                                </Box>
+                            ))}
+                            <Button startIcon={<AddPlusIcon />} onClick={addOpt}>Mais opção</Button>
+                        </Box>
+                    )}
+                </DialogContent>
+                <DialogActions>
+                    <Button onClick={() => setOpenEditQuestionModal(false)}>Cancelar</Button>
+                    <Button onClick={handleUpdateQuestion} variant="contained" disabled={savingQuestion} color="primary">
+                        {savingQuestion ? 'Salvando...' : 'Salvar Alterações'}
                     </Button>
                 </DialogActions>
             </Dialog>
@@ -651,21 +784,12 @@ function QuestionnaireManagerPage() {
                         <Box sx={{ p: 4, overflowY: 'auto', flexGrow: 1 }}>
                             {/* Dashboard de KPIs */}
                             <Grid container spacing={2} sx={{ mb: 4 }}>
-                                <Grid item xs={6}>
+                                <Grid item xs={12}>
                                     <Paper elevation={0} sx={{ p: 3, borderRadius: 4, bgcolor: 'white', border: '1px solid #eee' }}>
                                         <Typography variant="overline" sx={{ color: 'text.secondary', fontWeight: 900 }}>Respondentes</Typography>
                                         <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1, mt: 1 }}>
                                             <Typography variant="h4" sx={{ fontWeight: 900, color: '#1b5e20' }}>{quickStats.total}</Typography>
                                             <TrendIcon sx={{ color: '#4caf50', fontSize: 18 }} />
-                                        </Box>
-                                    </Paper>
-                                </Grid>
-                                <Grid item xs={6}>
-                                    <Paper elevation={0} sx={{ p: 3, borderRadius: 4, bgcolor: 'white', border: '1px solid #eee' }}>
-                                        <Typography variant="overline" sx={{ color: 'text.secondary', fontWeight: 900 }}>Nota Média</Typography>
-                                        <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1, mt: 1 }}>
-                                            <Typography variant="h4" sx={{ fontWeight: 900, color: '#f57c00' }}>{quickStats.average || '-'}</Typography>
-                                            <RateIcon sx={{ color: '#ffa726', fontSize: 18 }} />
                                         </Box>
                                     </Paper>
                                 </Grid>

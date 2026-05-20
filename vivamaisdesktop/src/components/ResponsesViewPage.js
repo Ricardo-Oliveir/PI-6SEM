@@ -163,7 +163,7 @@ function ResponsesViewPage() {
         });
 
         // Calcular média para ratings
-        if (question.type === 'rating') {
+        if (question.type === 'rating' || question.type === 'rating_10') {
             const numericResponses = responses
                 .map(r => parseInt(r.numeric_value || r.value))
                 .filter(n => !isNaN(n));
@@ -242,21 +242,21 @@ function ResponsesViewPage() {
         }
     };
 
-    const renderStars = (rating) => {
+    const renderStars = (rating, max = 5) => {
         const stars = [];
-        for (let i = 1; i <= 5; i++) {
+        for (let i = 1; i <= max; i++) {
             stars.push(
                 i <= rating 
-                    ? <StarIcon key={i} sx={{ color: '#FFB400', fontSize: 20 }} />
-                    : <StarBorderIcon key={i} sx={{ color: '#DDD', fontSize: 20 }} />
+                    ? <StarIcon key={i} sx={{ color: '#FFB400', fontSize: max > 5 ? 14 : 20 }} />
+                    : <StarBorderIcon key={i} sx={{ color: '#DDD', fontSize: max > 5 ? 14 : 20 }} />
             );
         }
-        return <Box sx={{ display: 'flex' }}>{stars}</Box>;
+        return <Box sx={{ display: 'flex', flexWrap: 'wrap' }}>{stars}</Box>;
     };
 
     const getQuestionTypeLabel = (type) => {
         const types = {
-            'rating': { label: 'Avaliação', color: '#F57C00' },
+            'rating_10': { label: 'Avaliação (1-10)', color: '#E65100' },
             'yes_no': { label: 'Sim/Não', color: '#1565C0' },
             'multiple_choice': { label: 'Múltipla Escolha', color: '#7B1FA2' },
             'text': { label: 'Texto Livre', color: '#2E7D32' }
@@ -457,7 +457,7 @@ function ResponsesViewPage() {
 
                                     {stats.total > 0 ? (
                                         <Box sx={{ height: 280 }}>
-                                            {question.type === 'rating' ? (
+                                            {question.type === 'rating' || question.type === 'rating_10' ? (
                                                 <Bar data={getBarChartData(question, stats)} options={barOptions} />
                                             ) : question.type === 'yes_no' ? (
                                                 <Doughnut data={getChartData(question, stats)} options={chartOptions} />
@@ -671,7 +671,9 @@ function ResponsesViewPage() {
                                                         <Box key={value} sx={{ mb: 2 }}>
                                                             <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
                                                                  <Typography variant="body2" fontWeight={500}>
-                                                                    {question.type === 'rating' ? renderStars(parseInt(value)) : value}
+                                                                    {question.type === 'rating' || question.type === 'rating_10' 
+                                                                        ? renderStars(parseInt(value), question.type === 'rating_10' ? 10 : 5) 
+                                                                        : value}
                                                                 </Typography>
                                                                 <Typography variant="body2" color="textSecondary">
                                                                     {count} ({percentage}%)

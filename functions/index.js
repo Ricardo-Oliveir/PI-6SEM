@@ -1,4 +1,4 @@
-// API Backend - Vida Mais (Firebase Firestore)
+// API Backend - Vida Mais (Firebase Firestore) [DEPLOY FORCE 2.0]
 
 const express = require('express');
 const admin = require('firebase-admin');
@@ -11,6 +11,9 @@ const { FieldValue } = require('firebase-admin/firestore');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// Helper para normalizar usernames (minúsculas e sem espaços)
+const normalizeUsername = (u) => String(u || '').toLowerCase().replace(/\s+/g, '').trim();
 
 // Inicializar Firebase Admin SDK
 let db;
@@ -165,11 +168,11 @@ const getFaceDistance = (desc1, desc2) => {
 };
 
 // Helper: Aplicar lógica de lotes (K-Anonymity)
-// Retorna apenas as sessões que fazem parte de um lote completo (múltiplo de 5) por questionário
-const getReleasedSessions = (allSessions, batchSize = 5) => {
-    if (!allSessions || allSessions.length === 0) return [];
+// Retorna apenas as sessões que fazem parte de um lote completo (múltiplo de 5)
+// Se totalUsers for fornecido, aplica a regra do "último lote dinâmico" para não prender o final
+const getReleasedSessions = (allSessions, batchSize = 5, totalUsersMap = {}) => {
+    if (!allSessions || allSessions.length === 0) return { releasedSessions: [], pendingSessionIds: new Set() };
 
-    // Agrupar sessões por questionário
     const sessionsByQuest = {};
     allSessions.forEach(s => {
         const qId = s.questionnaire_id;
@@ -182,23 +185,75 @@ const getReleasedSessions = (allSessions, batchSize = 5) => {
 
     Object.keys(sessionsByQuest).forEach(qId => {
         const sessions = sessionsByQuest[qId];
-        // Ordenar por data de criação para garantir que os primeiros a responder sejam os primeiros liberados
+        const totalPossible = totalUsersMap[qId] || 0;
+        const respondedCount = sessions.length;
+
+        // Ordenar por data
         sessions.sort((a, b) => {
             const dateA = a.created_at?.toDate?.() || new Date(a.created_at || 0);
             const dateB = b.created_at?.toDate?.() || new Date(b.created_at || 0);
             return dateA - dateB;
         });
 
-        const total = sessions.length;
-        const releasedCount = Math.floor(total / batchSize) * batchSize;
+        let releasedCount = 0;
+
+        if (totalPossible >= batchSize && respondedCount < totalPossible) {
+            // Regra do "Último Lote Dinâmico": 
+            // Se houver sobra (ex: 21 usuários), os últimos (5 + sobra) são liberados juntos no final.
+            const remainder = totalPossible % batchSize;
+            const threshold = totalPossible - remainder - batchSize; // Ex: 21 - 1 - 5 = 15
+            
+            if (respondedCount <= threshold) {
+                releasedCount = Math.floor(respondedCount / batchSize) * batchSize;
+            } else {
+                // Segura no limite do penúltimo lote até que TODOS do último respondam
+                releasedCount = threshold;
+            }
+        } else if (totalPossible > 0 && respondedCount >= totalPossible) {
+            // Se todos responderam (e são pelo menos 5), libera tudo
+            releasedCount = respondedCount >= batchSize ? respondedCount : 0;
+        } else {
+            // Lógica padrão se não soubermos o total ou se for < 5
+            releasedCount = Math.floor(respondedCount / batchSize) * batchSize;
+        }
         
         releasedSessions = releasedSessions.concat(sessions.slice(0, releasedCount));
-        
-        // Marcar os IDs das sessões que ainda não foram liberadas
         sessions.slice(releasedCount).forEach(s => pendingSessionIds.add(s.id));
     });
 
     return { releasedSessions, pendingSessionIds };
+};
+
+// Helper: Calcular média de score das respostas
+const calculateAverageScore = async (sessions) => {
+    if (!sessions || sessions.length === 0) return "0.0";
+    
+    try {
+        const sessionIds = sessions.map(s => s.id);
+        let totalScore = 0;
+        let totalResponses = 0;
+
+        // Processar em lotes de 30 para o Firestore
+        for (let i = 0; i < sessionIds.length; i += 30) {
+            const batch = sessionIds.slice(i, i + 30);
+            const snap = await db.collection('responses')
+                .where('session_id', 'in', batch)
+                .get();
+            
+            snap.forEach(doc => {
+                const data = doc.data();
+                if (data.numeric_value !== undefined && data.numeric_value !== null) {
+                    totalScore += Number(data.numeric_value);
+                    totalResponses++;
+                }
+            });
+        }
+
+        return totalResponses > 0 ? (totalScore / totalResponses).toFixed(1) : "0.0";
+    } catch (error) {
+        console.error("Erro ao calcular score médio:", error);
+        return "0.0";
+    }
 };
 
 // ROTAS
@@ -284,7 +339,7 @@ app.post('/api/init-database', async (req, res) => {
       const questions1 = [
         {
           text: 'Como você avalia o atendimento que recebeu?',
-          type: 'rating',
+          type: 'rating_10',
           options: null,
           order: 1,
           is_required: true
@@ -326,7 +381,7 @@ app.post('/api/init-database', async (req, res) => {
       const questions2 = [
         {
           text: 'Como você avalia a facilidade de acesso ao nosso local?',
-          type: 'rating',
+          type: 'rating_10',
           options: null,
           order: 1,
           is_required: true
@@ -466,7 +521,32 @@ app.post('/api/migrate-to-embedded', async (req, res) => {
   }
 });
 
-app.get('/api/questionnaires', async (req, res) => {
+// Migração para normalizar usernames existentes
+app.post('/api/auth/migrate-usernames', async (req, res) => {
+  try {
+    const snapshot = await db.collection('users').get();
+    let count = 0;
+    const batch = db.batch();
+
+    snapshot.forEach(doc => {
+      const data = doc.data();
+      const oldUsername = data.username;
+      const newUsername = normalizeUsername(oldUsername);
+
+      if (oldUsername && oldUsername !== newUsername) {
+        batch.update(doc.ref, { username: newUsername });
+        count++;
+      }
+    });
+
+    await batch.commit();
+    res.json({ success: true, message: `${count} usernames normalizados com sucesso.` });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/questionnaires', authenticateToken, async (req, res) => {
   try {
     const [qSnapshot, uSnapshot, sSnapshot] = await Promise.all([
       db.collection('questionnaires').get(),
@@ -474,7 +554,13 @@ app.get('/api/questionnaires', async (req, res) => {
       db.collection('response_sessions').get()
     ]);
 
-    const totalUsers = uSnapshot.size || 1; // Evita divisão por zero
+    // Contar apenas usuários que não são administradores para o engajamento
+    const activeUsers = uSnapshot.docs.filter(doc => {
+      const role = (doc.data().role || '').toLowerCase();
+      return role !== 'admin' && role !== 'administrator';
+    });
+    
+    const totalCollaborators = activeUsers.length || 1; // Evita divisão por zero
     const sessions = sSnapshot.docs.map(doc => doc.data());
     
     const questionnaires = qSnapshot.docs.map(doc => {
@@ -488,8 +574,8 @@ app.get('/api/questionnaires', async (req, res) => {
           .map(s => s.user_id)
       ).size;
 
-      // Cálculo Real de Engajamento
-      const engagementRate = Math.round((uniqueRespondents / totalUsers) * 100);
+      // Cálculo Real de Engajamento (Baseado em Colaboradores Ativos)
+      const engagementRate = Math.round((uniqueRespondents / totalCollaborators) * 100);
 
       // Tratamento de Data para evitar "Invalid Date"
       let createdAtIso = null;
@@ -502,11 +588,20 @@ app.get('/api/questionnaires', async (req, res) => {
       return { 
         id: qId, 
         ...qData,
-        created_at: createdAtIso, // Sobrescreve com formato ISO amigável
+        status: qData.status || (qData.is_active === false ? 'finished' : 'active'),
+        created_at: createdAtIso, 
+        updated_at: qData.updated_at?.toDate?.()?.toISOString() || qData.updated_at,
         engagement_rate: engagementRate,
         respondents_count: uniqueRespondents,
-        total_users_snapshot: totalUsers
+        total_collaborators_count: totalCollaborators
       };
+    });
+
+    // Ordenar por data de criação (mais recente primeiro)
+    questionnaires.sort((a, b) => {
+      const dateA = new Date(a.created_at || 0);
+      const dateB = new Date(b.created_at || 0);
+      return dateB - dateA;
     });
     
     res.json(questionnaires);
@@ -586,11 +681,12 @@ app.post('/api/auth/login', async (req, res) => {
       return res.status(400).json({ error: 'Username e password são obrigatórios' });
     }
 
-    console.log(`🔑 Tentativa de login para: ${username}`);
+    const cleanUsername = normalizeUsername(username);
+    console.log(`🔑 Tentativa de login para: ${cleanUsername}`);
 
     // Buscar usuário no Firestore
     const userSnapshot = await db.collection('users')
-      .where('username', '==', username)
+      .where('username', '==', cleanUsername)
       .limit(1)
       .get();
 
@@ -650,7 +746,11 @@ app.post('/api/auth/login', async (req, res) => {
 // Registro de usuário
 app.post('/api/auth/register', async (req, res) => {
   try {
-    const { username, full_name, email, password, role = 'user', face_photo, face_descriptor } = req.body;
+    const { 
+      username, full_name, email, password, 
+      role = 'user', face_photo, face_descriptor,
+      phone = '', address = '' 
+    } = req.body;
 
     // Validações
     if (!username || !email || !password) {
@@ -663,9 +763,11 @@ app.post('/api/auth/register', async (req, res) => {
 
     console.log(`📝 Tentativa de registro para: ${username}`);
 
+    const cleanUsername = normalizeUsername(username);
+
     // Verificar se username já existe
     const usernameSnapshot = await db.collection('users')
-      .where('username', '==', username)
+      .where('username', '==', cleanUsername)
       .limit(1)
       .get();
 
@@ -692,7 +794,7 @@ app.post('/api/auth/register', async (req, res) => {
           const u = doc.data();
           if (u.face_descriptor) {
               const dist = getFaceDistance(face_descriptor, u.face_descriptor);
-              if (dist < 0.45) {
+              if (dist < 0.55) {
                   biometricMatch = u.full_name;
               }
           }
@@ -705,14 +807,20 @@ app.post('/api/auth/register', async (req, res) => {
       }
     }
 
-    // Verificar se FULL NAME já existe (Evitar duplicidade de pessoas)
-    const nameSnapshot = await db.collection('users')
-      .where('full_name', '==', full_name)
-      .limit(1)
-      .get();
+    // Verificar se já existe alguém com o MESMO NOME e MESMO TELEFONE
+    // Isso permite homônimos (pessoas com mesmo nome) desde que tenham telefones diferentes
+    if (full_name) {
+      const duplicateSnapshot = await db.collection('users')
+        .where('full_name', '==', full_name)
+        .where('phone', '==', phone)
+        .limit(1)
+        .get();
 
-    if (!nameSnapshot.empty) {
-      return res.status(400).json({ error: 'Este nome já está cadastrado no sistema.' });
+      if (!duplicateSnapshot.empty) {
+        return res.status(400).json({ 
+          error: 'Já existe um cadastro com este mesmo nome e telefone. Verifique se a pessoa já possui conta.' 
+        });
+      }
     }
 
     // Hash da senha
@@ -720,9 +828,11 @@ app.post('/api/auth/register', async (req, res) => {
 
     // Criar usuário no Firestore
     const newUser = {
-      username,
+      username: cleanUsername,
       full_name: full_name || username,
       email,
+      phone: phone || '',
+      address: address || '',
       password_hash,
       role,
       created_at: FieldValue.serverTimestamp(),
@@ -836,7 +946,7 @@ app.put('/api/users/:id', authenticateToken, async (req, res) => {
             const u = userDoc.data();
             if (u.face_descriptor) {
                 const dist = getFaceDistance(face_descriptor, u.face_descriptor);
-                if (dist < 0.45) {
+                if (dist < 0.55) {
                     biometricMatch = u.full_name;
                 }
             }
@@ -880,45 +990,7 @@ app.put('/api/users/:id', authenticateToken, async (req, res) => {
   }
 });
 
-// === ROTAS DE QUESTIONÁRIOS ===
 
-// Listar todos os questionários
-app.get('/api/questionnaires', authenticateToken, async (req, res) => {
-  try {
-    console.log('📋 Buscando questionários...');
-    
-    // Consulta simples sem índice - buscar todos para o admin
-    const snapshot = await db.collection('questionnaires').get();
-
-    const questionnaires = [];
-    snapshot.forEach(doc => {
-      const data = doc.data();
-      
-      // Adm vê todos os status (draft, active, finished)
-      questionnaires.push({
-        id: doc.id,
-        ...data,
-        status: data.status || (data.is_active === false ? 'finished' : 'active'),
-        created_at: data.created_at?.toDate?.()?.toISOString() || data.created_at,
-        updated_at: data.updated_at?.toDate?.()?.toISOString() || data.updated_at
-      });
-    });
-
-    // Ordenar por data de criação (mais recente primeiro)
-    questionnaires.sort((a, b) => {
-      const dateA = new Date(a.created_at || 0);
-      const dateB = new Date(b.created_at || 0);
-      return dateB - dateA;
-    });
-
-    console.log(`✅ ${questionnaires.length} questionários encontrados`);
-    res.json(questionnaires);
-
-  } catch (error) {
-    console.error('❌ Erro ao buscar questionários:', error);
-    res.status(500).json({ error: 'Erro interno do servidor' });
-  }
-});
 
 // Listar questionários ativos (para usuários comuns)
 app.get('/api/questionnaires/active', authenticateToken, async (req, res) => {
@@ -1063,7 +1135,7 @@ app.get('/api/questionnaires/:id', authenticateToken, async (req, res) => {
 // Criar novo questionário (com questões embedded)
 app.post('/api/questionnaires', authenticateToken, async (req, res) => {
   try {
-    const { title, description, questions = [] } = req.body;
+    const { title, description, engagement_goal, questions = [] } = req.body;
     
     if (!title) {
       return res.status(400).json({ error: 'Título é obrigatório' });
@@ -1084,6 +1156,7 @@ app.post('/api/questionnaires', authenticateToken, async (req, res) => {
     const newQuestionnaire = {
       title,
       description: description || '',
+      engagement_goal: engagement_goal !== undefined ? Number(engagement_goal) : 80,
       created_by: req.user.id,
       created_at: FieldValue.serverTimestamp(),
       updated_at: FieldValue.serverTimestamp(),
@@ -1140,7 +1213,7 @@ app.patch('/api/questionnaires/:id/status', authenticateToken, async (req, res) 
 app.put('/api/questionnaires/:id', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
-    const { title, description } = req.body;
+    const { title, description, engagement_goal } = req.body;
     
     if (!title) {
       return res.status(400).json({ error: 'Título é obrigatório' });
@@ -1153,6 +1226,10 @@ app.put('/api/questionnaires/:id', authenticateToken, async (req, res) => {
       description: description || '',
       updated_at: FieldValue.serverTimestamp()
     };
+
+    if (engagement_goal !== undefined) {
+      updates.engagement_goal = Number(engagement_goal);
+    }
 
     await db.collection('questionnaires').doc(id).update(updates);
 
@@ -1173,33 +1250,55 @@ app.put('/api/questionnaires/:id', authenticateToken, async (req, res) => {
   }
 });
 
-// Deletar questionário (soft delete)
+// Deletar questionário (HARD DELETE - Remoção Total)
 app.delete('/api/questionnaires/:id', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
     
-    console.log(`🗑️ Deletando questionário: ${id}`);
+    console.log(`🗑️ Deletando questionário TOTALMENTE: ${id}`);
 
-    await db.collection('questionnaires').doc(id).update({
-      status: 'finished', // Deletar agora move para concluído/arquivado
-      is_active: false,   // Legado funcional
-      updated_at: FieldValue.serverTimestamp()
-    });
+    // Iniciar um batch para garantir atomicidade (máx 500 ops)
+    const batch = db.batch();
 
-    console.log(`✅ Questionário deletado: ${id}`);
+    // 1. Buscar e marcar para deletar todas as sessões deste questionário
+    const sessionsSnap = await db.collection('response_sessions')
+      .where('questionnaire_id', '==', id)
+      .get();
+    
+    console.log(`📊 Removendo ${sessionsSnap.size} sessões relacionadas`);
+
+    for (const sessionDoc of sessionsSnap.docs) {
+      const sessionId = sessionDoc.id;
+      
+      // 2. Buscar e marcar para deletar todas as respostas vinculadas a cada sessão
+      const responsesSnap = await db.collection('responses')
+        .where('session_id', '==', sessionId)
+        .get();
+      
+      responsesSnap.forEach(respDoc => {
+        batch.delete(respDoc.ref);
+      });
+
+      // Deletar a sessão em si
+      batch.delete(sessionDoc.ref);
+    }
+
+    // 3. Deletar o questionário (questions embedded já vão junto)
+    batch.delete(db.collection('questionnaires').doc(id));
+
+    // Executar o batch
+    await batch.commit();
+
+    console.log(`✅ Questionário, sessões e respostas deletados: ${id}`);
     
     res.json({
       success: true,
-      message: 'Questionário deletado com sucesso'
+      message: 'Questionário e todos os dados vinculados foram removidos permanentemente'
     });
 
   } catch (error) {
-    console.error('❌ Erro ao deletar questionário:', error);
-    if (error.code === 'not-found') {
-      res.status(404).json({ error: 'Questionário não encontrado' });
-    } else {
-      res.status(500).json({ error: 'Erro interno do servidor' });
-    }
+    console.error('❌ Erro ao deletar questionário permanentemente:', error);
+    res.status(500).json({ error: 'Erro interno do servidor ao processar exclusão' });
   }
 });
 
@@ -1636,20 +1735,17 @@ app.get('/api/questionnaires/:id/responses', authenticateToken, async (req, res)
     }
     const qData = questionnaireDoc.data();
     
-    // Buscar todas as sessões deste questionário
+    // Buscar todas as sessões deste questionário (Removido o filtro de lotes para o Admin)
     const sessionsSnap = await db.collection('response_sessions')
         .where('questionnaire_id', '==', id)
         .get();
         
     const allSessions = sessionsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-    
-    // Aplicar lotes (BATCH_SIZE = 5)
-    const { releasedSessions } = getReleasedSessions(allSessions, 5);
-    const releasedSessionIds = new Set(releasedSessions.map(s => s.id));
+    const sessionIds = new Set(allSessions.map(s => s.id));
 
     const questionIds = (qData.questions || []).map(q => q.id);
 
-    if (questionIds.length === 0 || releasedSessionIds.size === 0) {
+    if (questionIds.length === 0 || sessionIds.size === 0) {
       return res.json([]);
     }
 
@@ -1667,8 +1763,8 @@ app.get('/api/questionnaires/:id/responses', authenticateToken, async (req, res)
 
       snapshot.forEach(doc => {
         const data = doc.data();
-        // Filtrar apenas respostas de sessões liberadas
-        if (releasedSessionIds.has(data.session_id)) {
+        // Filtrar apenas respostas das sessões encontradas
+        if (sessionIds.has(data.session_id)) {
             responses.push({
                 id: doc.id,
                 ...data,
@@ -1760,7 +1856,12 @@ app.get('/api/questionnaires/:id/statistics', authenticateToken, async (req, res
         .where('questionnaire_id', '==', id)
         .get();
     const allSessions = sessionsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-    const { releasedSessions } = getReleasedSessions(allSessions, 5);
+    // Buscar usuários para saber o total possível
+    const usersSnap = await db.collection('users').get();
+    const activeUsers = usersSnap.docs.filter(d => d.data().role !== 'admin' && d.data().is_active !== false);
+    const totalPossible = activeUsers.length;
+
+    const { releasedSessions } = getReleasedSessions(allSessions, 5, { [id]: totalPossible });
     const releasedSessionIds = new Set(releasedSessions.map(s => s.id));
 
     // Contar respostas para este questionário (apenas de sessões liberadas)
@@ -1785,7 +1886,7 @@ app.get('/api/questionnaires/:id/statistics', authenticateToken, async (req, res
     }
 
     // 4. Identificar Usuários Pendentes para este questionário
-    const usersSnap = await db.collection('users').get();
+
     const allRespondentIds = new Set(allSessions.map(s => String(s.user_id)));
     const releasedRespondentIds = new Set(releasedSessions.map(s => String(s.user_id)));
     
@@ -1971,49 +2072,99 @@ app.get('/api/statistics', authenticateToken, async (req, res) => {
 // NOVA ROTA: DADOS DO DASHBOARD (Adicione no final do arquivo)
 // =========================================================
 
+// Helper para extrair Ano, Mês e Dia no fuso horário de Brasília (UTC-3)
+const getBrazilYMD = (timestamp) => {
+    if (!timestamp) return { year: new Date().getFullYear(), month: new Date().getMonth(), day: new Date().getDate() };
+    const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
+    const str = new Intl.DateTimeFormat('en-US', {
+        timeZone: 'America/Sao_Paulo',
+        year: 'numeric', month: 'numeric', day: 'numeric'
+    }).format(date);
+    const [month, day, year] = str.split('/');
+    return {
+        year: parseInt(year, 10),
+        month: parseInt(month, 10) - 1, // 0-indexed para compatibilidade com Date.getMonth()
+        day: parseInt(day, 10)
+    };
+};
+
+// Endpoint para salvar a meta de engajamento
+app.post('/api/settings/goal', authenticateToken, async (req, res) => {
+  try {
+    const { goal } = req.body;
+    if (goal === undefined) return res.status(400).json({ error: 'Meta é obrigatória' });
+    
+    console.log(`🎯 Atualizando meta de engajamento para: ${goal}%`);
+    
+    await db.collection('system_settings').doc('dashboard').set({
+      engagement_goal: Number(goal),
+      updated_at: FieldValue.serverTimestamp(),
+      updated_by: req.user.id
+    }, { merge: true });
+    
+    res.json({ success: true, message: 'Meta atualizada com sucesso' });
+  } catch (error) {
+    console.error('❌ Erro ao salvar meta:', error);
+    res.status(500).json({ error: 'Erro interno' });
+  }
+});
+
 app.get('/api/dashboard-data', authenticateToken, async (req, res) => {
   try {
-    const { year = new Date().getFullYear(), month } = req.query;
+    const { year = new Date().getFullYear(), month, questionnaireId } = req.query;
     const targetYear = parseInt(year);
     const targetMonth = month !== undefined ? parseInt(month) : -1; // -1 significa "todos"
     
-    console.log(`📊 Buscando dados para o Dashboard (${targetYear}, Mês: ${targetMonth})...`);
+    console.log(`📊 Buscando dados para o Dashboard (${targetYear}, Mês: ${targetMonth}, Questionário: ${questionnaireId})...`);
     
-    // 1. Contar Usuários e Questionários
-    const [usersSnap, questsSnap] = await Promise.all([
-        db.collection('users').get(),
-        db.collection('questionnaires').get()
-    ]);
-    
-    let activeQuests = 0;
+    // 1. Contar Usuários (Filtrando Administradores e Inativos)
+    const usersSnap = await db.collection('users').get();
+    const filteredUsers = [];
+    usersSnap.forEach(doc => {
+        const data = doc.data();
+        const role = (data.role || '').toLowerCase();
+        if (role !== 'admin' && role !== 'administrator' && data.is_active !== false) {
+            filteredUsers.push({ id: doc.id, ...data });
+        }
+    });
+    const activeUserCount = filteredUsers.length;
+
+    // 2. Buscar Questionários Ativos
+    const questsSnap = await db.collection('questionnaires').get();
+    const activeQuestionnaires = [];
     questsSnap.forEach(doc => {
         const data = doc.data();
-        if (data.is_active !== false && data.status !== 'finished') activeQuests++;
-    });
-
-    // 2. Buscar Sessões de Resposta e Aplicar Lotes
-    const [sessionsSnap, usersFullSnap] = await Promise.all([
-        db.collection('response_sessions').get(),
-        db.collection('users').get()
-    ]);
-    
-    // Mapeamento de IDs e Usernames para garantir que encontremos o nome
-    const userNamesMap = {};
-    const userNameToFullName = {};
-    
-    usersFullSnap.forEach(doc => {
-        const uData = doc.data();
-        const uid = String(doc.id);
-        userNamesMap[uid] = uData.full_name;
-        if (uData.username) {
-            userNameToFullName[String(uData.username).toLowerCase()] = uData.full_name;
+        if (data.is_active !== false && data.status !== 'finished') {
+            activeQuestionnaires.push({ id: doc.id, title: data.title });
         }
     });
 
-    const allSessions = sessionsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    console.log(`🔍 DEBUG: Encontrados ${usersSnap.size} usuários totais, ${activeUserCount} colaboradores ativos.`);
     
-    // BATCH SIZE = 5
-    const { releasedSessions, pendingSessionIds } = getReleasedSessions(allSessions, 5);
+    // 3. Buscar Sessões de Resposta e Aplicar Lotes
+    const sessionsSnap = await db.collection('response_sessions').get();
+    
+    // Mapeamento de IDs e Usernames para garantir que encontremos o nome
+    const userNamesMap = {};
+    usersSnap.forEach(doc => {
+        const uData = doc.data();
+        userNamesMap[String(doc.id)] = uData.full_name;
+    });
+
+    const unfilteredSessionsForDetails = sessionsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    let allSessions = sessionsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    
+    if (questionnaireId && questionnaireId !== 'all') {
+        allSessions = allSessions.filter(s => s.questionnaire_id === questionnaireId);
+    }
+    
+    // BATCH SIZE = 5 para o Anonimato
+    const totalUsersMap = {};
+    activeQuestionnaires.forEach(q => { 
+        totalUsersMap[q.id] = activeUserCount; 
+    });
+
+    const { releasedSessions, pendingSessionIds } = getReleasedSessions(allSessions, 5, totalUsersMap);
     
     const monthlyCounts = new Array(12).fill(0);
     const monthlyQuestionnaireCounts = new Array(12).fill(0);
@@ -2032,7 +2183,32 @@ app.get('/api/dashboard-data', authenticateToken, async (req, res) => {
         questionnaireTitles[doc.id] = doc.data().title;
     });
 
-    let responsesInPeriod = 0;
+    let realResponsesInPeriod = 0;
+    const realMonthlyCounts = new Array(12).fill(0);
+    let realDailyCounts = [];
+    if (targetMonth !== -1) {
+        const daysInMonth = new Date(targetYear, targetMonth + 1, 0).getDate();
+        realDailyCounts = new Array(daysInMonth).fill(0);
+    }
+
+    // 1. Cálculo Real (Para KPIs e Gráficos)
+    allSessions.forEach(s => {
+        if (s.created_at) {
+            const { year: sYear, month: sMonth, day: sDay } = getBrazilYMD(s.created_at);
+            if (sYear === targetYear) {
+                realMonthlyCounts[sMonth]++;
+
+                if (targetMonth === -1 || sMonth === targetMonth) {
+                    realResponsesInPeriod++;
+                    if (targetMonth !== -1) {
+                        realDailyCounts[sDay - 1]++;
+                    }
+                }
+            }
+        }
+    });
+
+    // 2. Cálculo Filtrado (Para Carrossel/Identificação)
     let releasedPeriodSessionIds = new Set();
     let respondentDetails = []; // { name, questionnaire }
     let respondentMap = {}; // user_id -> set of questionnaire_ids responded
@@ -2045,22 +2221,16 @@ app.get('/api/dashboard-data', authenticateToken, async (req, res) => {
         }
 
         if (s.created_at) {
-            const date = s.created_at.toDate();
-            if (date.getFullYear() === targetYear) {
-                const sMonth = date.getMonth();
-                monthlyCounts[sMonth]++;
-
+            const { year: sYear, month: sMonth } = getBrazilYMD(s.created_at);
+            if (sYear === targetYear) {
                 if (targetMonth === -1 || sMonth === targetMonth) {
-                    responsesInPeriod++;
                     releasedPeriodSessionIds.add(s.id);
                     
-                    // Tenta encontrar o nome por ID ou por Username (caso gravado errado na sessão)
                     let realName = userNamesMap[uid];
                     if (!realName && s.respondent_name && s.respondent_name !== 'Anônimo' && s.respondent_name !== 'Colaborador Anônimo') {
                         realName = s.respondent_name;
                     }
                     
-                    // Fallback para "Participante" se tudo falhar, mas tenta limpar o "Anônimo"
                     if (!realName || realName === 'Anônimo' || realName === 'Colaborador Anônimo') {
                         realName = 'Participante';
                     }
@@ -2069,67 +2239,41 @@ app.get('/api/dashboard-data', authenticateToken, async (req, res) => {
                         name: realName,
                         questionnaire: questionnaireTitles[s.questionnaire_id] || 'Questionário Removido'
                     });
-                    
-                    if (targetMonth !== -1) {
-                        const sDay = date.getDate();
-                        dailyCounts[sDay - 1]++;
-                    }
                 }
             }
         }
     });
 
+    const activity = await calculateAverageScore(allSessions);
+
     // Contagem mensal de questionários criados
     questsSnap.forEach(doc => {
         const data = doc.data();
         if (data.created_at) {
-            const date = data.created_at.toDate();
-            if (date.getFullYear() === targetYear) {
-                const qMonth = date.getMonth();
+            const { year: qYear, month: qMonth, day: qDay } = getBrazilYMD(data.created_at);
+            if (qYear === targetYear) {
                 monthlyQuestionnaireCounts[qMonth]++;
                 
                 if (targetMonth !== -1 && qMonth === targetMonth) {
-                    const qDay = date.getDate();
                     dailyQuestionnaireCounts[qDay - 1]++;
                 }
             }
         }
     });
 
-    // 3. Calcular Média de Atividade (Apenas Liberados)
-    let totalScore = 0;
-    let scoreCount = 0;
-    const responsesSnap = await db.collection('responses').get();
-    
-    responsesSnap.forEach(doc => {
-        const data = doc.data();
-        if (releasedPeriodSessionIds.has(data.session_id)) {
-            if (data.numeric_value !== null && data.numeric_value !== undefined) {
-                totalScore += Number(data.numeric_value);
-                scoreCount++;
-            }
-        }
-    });
-
-    const activity = scoreCount > 0 ? (totalScore / scoreCount).toFixed(1) : "0.0";
-
     // 4. Identificar Usuários Pendentes por Questionário
     const pendingDetails = [];
-    const activeQuestionnaires = [];
-    questsSnap.forEach(doc => {
-        const data = doc.data();
-        if (data.is_active !== false && data.status !== 'finished') {
-            activeQuestionnaires.push({ id: doc.id, title: data.title });
-        }
-    });
-
     usersSnap.forEach(doc => {
         const u = doc.data();
-        if (u.role !== 'admin' && u.role !== 'administrator' && u.is_active !== false) {
+        const role = (u.role || '').toLowerCase();
+        if (role !== 'admin' && role !== 'administrator' && u.is_active !== false) {
             const uid = String(doc.id);
             const userRespondedTo = respondentMap[uid] || new Set();
 
             activeQuestionnaires.forEach(q => {
+                if (questionnaireId && questionnaireId !== 'all' && q.id !== questionnaireId) {
+                    return;
+                }
                 if (!userRespondedTo.has(q.id)) {
                     pendingDetails.push({
                         id: `${uid}_${q.id}`,
@@ -2142,42 +2286,79 @@ app.get('/api/dashboard-data', authenticateToken, async (req, res) => {
         }
     });
 
-    // Filtrar Administradores
-    const filteredUsers = [];
-    usersSnap.forEach(doc => {
-        const data = doc.data();
-        if (data.role !== 'admin' && data.role !== 'administrator') {
-            filteredUsers.push({ id: doc.id, ...data });
+    // 5. Buscar Meta do Firestore
+    const settingsSnap = await db.collection('system_settings').doc('dashboard').get();
+    const globalEngagementGoal = settingsSnap.exists ? settingsSnap.data().engagement_goal : 80;
+
+    let engagementGoal = globalEngagementGoal;
+    if (questionnaireId && questionnaireId !== 'all') {
+        const qDoc = questsSnap.docs.find(d => d.id === questionnaireId);
+        if (qDoc && qDoc.data().engagement_goal !== undefined) {
+            engagementGoal = Number(qDoc.data().engagement_goal);
         }
+    }
+
+    // Calcular dados individuais por questionário (usando sessões não filtradas)
+    const questionnairesDetails = activeQuestionnaires.map(q => {
+        const qDoc = questsSnap.docs.find(d => d.id === q.id);
+        const qData = qDoc ? qDoc.data() : {};
+        
+        // Contar usuários únicos que responderam este questionário específico
+        const uniqueRespondents = new Set(
+            unfilteredSessionsForDetails
+                .filter(s => s.questionnaire_id === q.id && s.user_id)
+                .map(s => s.user_id)
+        ).size;
+        
+        const rate = activeUserCount > 0 
+            ? parseFloat(((uniqueRespondents / activeUserCount) * 100).toFixed(1))
+            : 0.0;
+            
+        const qGoal = qData.engagement_goal !== undefined 
+            ? Number(qData.engagement_goal) 
+            : Number(globalEngagementGoal);
+            
+        return {
+            id: q.id,
+            title: q.title,
+            engagementRate: rate,
+            engagementGoal: qGoal,
+            responsesCount: uniqueRespondents
+        };
     });
-    const activeUserCount = filteredUsers.length;
+
+    const rateDivisor = activeUserCount * (questionnaireId && questionnaireId !== 'all' ? 1 : activeQuestionnaires.length);
+    const engagementRate = rateDivisor > 0 
+        ? ((allSessions.length / rateDivisor) * 100).toFixed(1) 
+        : "0.0";
 
     const stats = {
       totalUsers: activeUserCount,
-      totalQuestionnaires: activeQuests,
-      responses: responsesInPeriod,
+      totalQuestionnaires: questionnaireId && questionnaireId !== 'all' ? 1 : activeQuestionnaires.length,
+      responses: realResponsesInPeriod,
       activity: activity,
-      engagementRate: (activeUserCount * activeQuests) > 0 
-          ? ((allSessions.length / (activeUserCount * questsSnap.size)) * 100).toFixed(1) 
-          : "0.0",
-      monthlyCounts: monthlyCounts,
+      engagementRate: engagementRate,
+      engagementGoal: engagementGoal, // Retornar a meta específica ou global
+      questionnairesDetails: questionnairesDetails,
+      monthlyCounts: realMonthlyCounts,
       monthlyQuestionnaireCounts: monthlyQuestionnaireCounts,
-      dailyCounts: dailyCounts,
+      dailyCounts: realDailyCounts,
       dailyQuestionnaireCounts: dailyQuestionnaireCounts,
       pendingUsers: pendingDetails,
-      respondents: respondentDetails,
+      respondents: respondentDetails, 
       batchSize: 5,
-      realTotalResponses: allSessions.length
+      realTotalResponses: allSessions.length,
+      debugInfo: { usersInSnap: usersSnap.size }
     };
 
-    console.log('✅ Dados do Dashboard consolidados (Lote 5):', stats);
+    console.log('✅ Dados do Dashboard consolidados:', stats);
     res.json(stats);
 
   } catch (error) {
     console.error('❌ Erro no Dashboard:', error);
     res.json({ 
-        totalUsers: 0, 
-        totalQuestionnaires: 0, 
+        totalUsers: -1, 
+        errorMessage: error.message,        totalQuestionnaires: 0, 
         responses: 0, 
         activity: "0.0", 
         monthlyCounts: new Array(12).fill(0),
@@ -2190,47 +2371,75 @@ app.get('/api/dashboard-data', authenticateToken, async (req, res) => {
 app.get('/api/public/dashboard-data', async (req, res) => {
     try {
         const targetYear = new Date().getFullYear();
-        
+        const { questionnaireId } = req.query;
+
         const [usersSnap, questsSnap, sessionsSnap] = await Promise.all([
             db.collection('users').get(),
             db.collection('questionnaires').get(),
             db.collection('response_sessions').get()
         ]);
+
+        // 1. Filtrar Usuários (Excluindo Administradores)
+        const allUsersList = [];
+        const userNamesMap = {};
+        usersSnap.forEach(doc => {
+            const uData = doc.data();
+            const role = (uData.role || '').toLowerCase();
+            if (role !== 'admin' && role !== 'administrator' && uData.is_active !== false) {
+                const uid = String(doc.id);
+                userNamesMap[uid] = uData.full_name;
+                allUsersList.push({ id: uid, ...uData });
+            }
+        });
+        const activeUserCount = allUsersList.length;
+
+        // 2. Filtrar Questionários Ativos
+        const activeQuestionnaires = [];
+        questsSnap.forEach(doc => {
+            const data = doc.data();
+            if (data.is_active !== false && data.status !== 'finished') {
+                activeQuestionnaires.push({ id: doc.id, title: data.title });
+            }
+        });
+
+        const unfilteredSessionsForDetails = sessionsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        let allSessions = sessionsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
         
-        const allSessions = sessionsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        if (questionnaireId && questionnaireId !== 'all') {
+            allSessions = allSessions.filter(s => s.questionnaire_id === questionnaireId);
+        }
         const questionnaireTitles = {};
         questsSnap.forEach(doc => {
             questionnaireTitles[doc.id] = doc.data().title;
         });
 
-        // Mapeamento de usuários (Filtrando ADM)
-        const userNamesMap = {};
-        const allUsersList = [];
-        usersSnap.forEach(doc => {
-            const uData = doc.data();
-            const uid = String(doc.id);
-            // Ignora administradores no engajamento e pendências
-            if (uData.role !== 'admin' && uData.role !== 'administrator') {
-                userNamesMap[uid] = uData.full_name;
-                allUsersList.push({ id: uid, ...uData });
-            }
-        });
-
-        const activeUserCount = allUsersList.length;
-
         // Aplicar Lotes (K-Anonymity) - BATCH SIZE = 5
-        const { releasedSessions } = getReleasedSessions(allSessions, 5);
+        const totalUsersMap = {};
+        activeQuestionnaires.forEach(q => { 
+            totalUsersMap[q.id] = activeUserCount; 
+        });
+        
+        const { releasedSessions } = getReleasedSessions(allSessions, 5, totalUsersMap);
         
         const monthlyCounts = new Array(12).fill(0);
         const monthlyQuestionnaireCounts = new Array(12).fill(0);
         let releasedRespondentNames = [];
 
+        // 1. Contagem TOTAL para o Gráfico (Não viola anonimato)
+        allSessions.forEach(s => {
+            if (s.created_at) {
+                const { year: sYear, month: sMonth } = getBrazilYMD(s.created_at);
+                if (sYear === targetYear) {
+                    monthlyCounts[sMonth]++;
+                }
+            }
+        });
+
+        // 2. Dados FILTRADOS para o Carrossel (Anonimato garantido)
         releasedSessions.forEach(s => {
             if (s.created_at) {
-                const date = s.created_at.toDate();
-                if (date.getFullYear() === targetYear) {
-                    monthlyCounts[date.getMonth()]++;
-                    
+                const { year: sYear } = getBrazilYMD(s.created_at);
+                if (sYear === targetYear) {
                     const uid = s.user_id ? String(s.user_id) : null;
                     const realName = (uid && userNamesMap[uid]) || s.respondent_name || 'Participante';
                     const qTitle = questionnaireTitles[s.questionnaire_id] || 'Pesquisa';
@@ -2243,12 +2452,15 @@ app.get('/api/public/dashboard-data', async (req, res) => {
             }
         });
     
-        questsSnap.forEach(doc => {
-            const data = doc.data();
-            if (data.created_at) {
-                const date = data.created_at.toDate();
-                if (date.getFullYear() === targetYear) {
-                    monthlyQuestionnaireCounts[date.getMonth()]++;
+        // 3. Questionários ATIVOS
+        // 3. Contagem de Questionários por Período
+        let activeQuestsCount = activeQuestionnaires.length;
+        activeQuestionnaires.forEach(q => {
+            const qDoc = questsSnap.docs.find(d => d.id === q.id);
+            if (qDoc && qDoc.data().created_at) {
+                const { year: qYear, month: qMonth } = getBrazilYMD(qDoc.data().created_at);
+                if (qYear === targetYear) {
+                    monthlyQuestionnaireCounts[qMonth]++;
                 }
             }
         });
@@ -2261,36 +2473,121 @@ app.get('/api/public/dashboard-data', async (req, res) => {
             const respondedQuests = new Set(userResponses.map(s => s.questionnaire_id));
 
             questsSnap.forEach(qDoc => {
-                if (qDoc.data().is_active !== false && !respondedQuests.has(qDoc.id)) {
+                const qData = qDoc.data();
+                if (qData.is_active !== false && qData.status !== 'finished' && !respondedQuests.has(qDoc.id)) {
                     pendingUsers.push({
                         full_name: user.full_name,
-                        questionnaire: qDoc.data().title
+                        questionnaire: qData.title
                     });
                 }
             });
         });
   
-        // Cálculo de Engajamento Unificado (Excluindo Admins)
-        const potentialResponses = activeUserCount * questsSnap.size;
-        const engagementRate = potentialResponses > 0 
-            ? ((allSessions.length / potentialResponses) * 100).toFixed(1) 
-            : "0.0";
+        // 5. Calcular Dados Diários para o Mês ATUAL (Para a TV)
+        const now = new Date();
+        const currentYear = now.getFullYear();
+        const currentMonth = now.getMonth();
+        const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
+        
+        const dailyCounts = new Array(daysInMonth).fill(0);
+        const dailyQuestionnaireCounts = new Array(daysInMonth).fill(0);
+
+        allSessions.forEach(s => {
+            if (s.created_at) {
+                const { year: sYear, month: sMonth, day: sDay } = getBrazilYMD(s.created_at);
+                if (sYear === currentYear && sMonth === currentMonth) {
+                    dailyCounts[sDay - 1]++;
+                }
+            }
+        });
+
+        questsSnap.forEach(doc => {
+            const data = doc.data();
+            if (data.created_at) {
+                const { year: qYear, month: qMonth, day: qDay } = getBrazilYMD(data.created_at);
+                if (qYear === currentYear && qMonth === currentMonth) {
+                    dailyQuestionnaireCounts[qDay - 1]++;
+                }
+            }
+        });
+
+        // 5. Buscar Meta do Firestore
+        const settingsSnap = await db.collection('system_settings').doc('dashboard').get();
+        const globalEngagementGoal = settingsSnap.exists ? settingsSnap.data().engagement_goal : 80;
   
+        let engagementGoal = globalEngagementGoal;
+        if (questionnaireId && questionnaireId !== 'all') {
+            const qDoc = questsSnap.docs.find(d => d.id === questionnaireId);
+            if (qDoc && qDoc.data().engagement_goal !== undefined) {
+                engagementGoal = Number(qDoc.data().engagement_goal);
+            }
+        }
+
+        // Calcular dados individuais por questionário (usando sessões não filtradas)
+        const questionnairesDetails = activeQuestionnaires.map(q => {
+            const qDoc = questsSnap.docs.find(d => d.id === q.id);
+            const qData = qDoc ? qDoc.data() : {};
+            
+            // Contar usuários únicos que responderam este questionário específico
+            const uniqueRespondents = new Set(
+                unfilteredSessionsForDetails
+                    .filter(s => s.questionnaire_id === q.id && s.user_id)
+                    .map(s => s.user_id)
+            ).size;
+            
+            const rate = activeUserCount > 0 
+                ? parseFloat(((uniqueRespondents / activeUserCount) * 100).toFixed(1))
+                : 0.0;
+                
+            const qGoal = qData.engagement_goal !== undefined 
+                ? Number(qData.engagement_goal) 
+                : Number(globalEngagementGoal);
+                
+            return {
+                id: q.id,
+                title: q.title,
+                engagementRate: rate,
+                engagementGoal: qGoal,
+                responsesCount: uniqueRespondents
+            };
+        });
+
+        const rateDivisor = activeUserCount * (questionnaireId && questionnaireId !== 'all' ? 1 : activeQuestionnaires.length);
+        const engagementRate = rateDivisor > 0 
+            ? ((allSessions.length / rateDivisor) * 100).toFixed(1) 
+            : "0.0";
+
         res.json({
             totalUsers: activeUserCount,
-            totalQuestionnaires: questsSnap.size,
+            totalQuestionnaires: activeQuestsCount,
             responses: allSessions.length,
             engagementRate: engagementRate,
-            activity: 9.2,
+            engagementGoal: engagementGoal,
+            questionnairesDetails: questionnairesDetails,
+            activity: await calculateAverageScore(allSessions),
             monthlyCounts,
             monthlyQuestionnaireCounts,
+            dailyCounts,
+            dailyQuestionnaireCounts,
             respondents: releasedRespondentNames,
             pendingUsers,
             batchSize: 5
         });
     } catch (error) {
         console.error('❌ Erro no Dashboard Público:', error);
-        res.status(500).json({ error: 'Erro ao buscar dados públicos' });
+        res.json({ 
+            totalUsers: -1, 
+            errorMessage: error.message,
+            totalQuestionnaires: 0, 
+            responses: 0, 
+            engagementRate: "0.0",
+            activity: "0.0", 
+            monthlyCounts: new Array(12).fill(0),
+            monthlyQuestionnaireCounts: new Array(12).fill(0),
+            respondents: [],
+            pendingUsers: [],
+            batchSize: 5
+        });
     }
 });
 
@@ -2316,26 +2613,72 @@ process.on('uncaughtException', (err) => {
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 
 // Configure a chave da API do Gemini
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY || 'AIzaSyCFJCQeqhouihdvkpLdptuW1rttFAuJwjo';
 let genAI = null;
 let geminiModel = null;
 
 if (GEMINI_API_KEY) {
   genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-  geminiModel = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
-  console.log('✅ Gemini AI configurado com sucesso!');
+  // Usando gemini-flash-latest para melhor desempenho e compatibilidade em 2026
+  geminiModel = genAI.getGenerativeModel({ 
+    model: 'gemini-flash-latest'
+  });
+  console.log(`✅ Gemini AI configurado com sucesso! (Modelo: gemini-flash-latest)`);
 } else {
   console.log('⚠️ GEMINI_API_KEY não configurada - usando análise estatística básica');
 }
 
+// Função auxiliar para extrair JSON de uma string que pode conter markdown ou texto extra
+function extractJson(text) {
+  try {
+    // Tenta encontrar o primeiro { e o último }
+    const start = text.indexOf('{');
+    const end = text.lastIndexOf('}');
+    if (start !== -1 && end !== -1 && end > start) {
+      const jsonStr = text.substring(start, end + 1);
+      return JSON.parse(jsonStr);
+    }
+    return JSON.parse(text);
+  } catch (e) {
+    console.error('❌ Erro ao extrair JSON do texto:', e.message);
+    console.log('📄 Texto original:', text);
+    throw new Error('Falha ao processar resposta da IA');
+  }
+}
+
 // Função auxiliar para coletar dados completos do questionário
 async function collectQuestionnaireData(questionnaireId) {
-  // 1. Buscar questionário com suas perguntas
+  // 1. Buscar questionário
   const qDoc = await db.collection('questionnaires').doc(questionnaireId).get();
   if (!qDoc.exists) {
     throw new Error('Questionário não encontrado');
   }
   const questionnaireData = qDoc.data();
+  
+  // 2. Buscar perguntas (embedded ou da coleção separada como fallback)
+  let questions = questionnaireData.questions || [];
+  
+  if (questions.length === 0) {
+    console.log(`🔍 Buscando questões na coleção separada para o questionário: ${questionnaireId}`);
+    const questionsSnap = await db.collection('questions')
+      .where('questionnaire_id', '==', questionnaireId)
+      .get();
+    
+    questionsSnap.forEach(doc => {
+      const qData = doc.data();
+      questions.push({
+        id: doc.id,
+        text: qData.text,
+        type: qData.type,
+        options: qData.options || null,
+        order: qData.order || qData.order_index || 0,
+        is_required: qData.is_required !== false
+      });
+    });
+    
+    // Ordenar por ordem se necessário
+    questions.sort((a, b) => (a.order || 0) - (b.order || 0));
+  }
   
   // 2. Buscar todas as sessões de resposta deste questionário
   const sessionsSnap = await db.collection('response_sessions')
@@ -2525,8 +2868,8 @@ Forneça uma análise completa em formato JSON com a seguinte estrutura EXATA:
     }
   ],
   "metricas_chave": {
-    "satisfacao_geral": "X.X/5 ou N/A",
-    "taxa_resposta_positiva": "XX%",
+    "feedback_positivo": "XX%",
+    "nivel_engajamento": "alto|medio|baixo",
     "principais_preocupacoes": ["lista de preocupações"]
   },
   "tendencias": [
@@ -2554,16 +2897,17 @@ app.post('/api/generate-insights', authenticateToken, async (req, res) => {
     const rawData = await collectQuestionnaireData(questionnaireId);
     
     // Verificar se há dados suficientes
-    if (rawData.totalRespondents === 0) {
+    if (rawData.totalRespondents === 0 || rawData.questions.length === 0) {
+      const reason = rawData.totalRespondents === 0 ? "Ainda não há respostas registradas." : "O questionário não possui perguntas configuradas.";
       return res.json({ 
         success: true, 
         analysis: {
-          strengths: ["Questionário criado com sucesso."],
-          improvements: ["Ainda não há respostas registradas."],
-          action_plan: ["Divulgue o questionário para coletar respostas.", "Compartilhe o link com os participantes."]
+          strengths: ["Questionário identificado."],
+          improvements: [reason],
+          action_plan: ["Coletar mais respostas."]
         },
         detailed: null,
-        message: "Aguardando respostas para análise completa"
+        message: "Dados insuficientes"
       });
     }
 
@@ -2573,26 +2917,27 @@ app.post('/api/generate-insights', authenticateToken, async (req, res) => {
 
     // 3. Verificar se Gemini está disponível
     if (geminiModel && GEMINI_API_KEY) {
-      console.log('🤖 Usando Gemini AI para análise avançada...');
+      console.log('🤖 Solicitando análise ao Gemini AI...');
       
       try {
         const prompt = generateGeminiPrompt(analysisData);
         const result = await geminiModel.generateContent(prompt);
         const response = await result.response;
-        let aiText = response.text();
+        const aiText = response.text();
         
-        // Limpar resposta do Gemini (remover markdown se houver)
-        aiText = aiText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+        console.log('🤖 Resposta bruta recebida do Gemini (comprimento):', aiText.length);
         
-        const aiAnalysis = JSON.parse(aiText);
+        const aiAnalysis = extractJson(aiText);
         
-        console.log('✅ Análise do Gemini concluída com sucesso!');
+        console.log('✅ Análise do Gemini processada com sucesso!');
         
         // Converter para formato compatível com frontend existente + dados extras
         const analysis = {
-          strengths: aiAnalysis.pontos_fortes || [],
-          improvements: aiAnalysis.pontos_atencao || [],
-          action_plan: aiAnalysis.plano_acao?.map(a => `[${a.prazo_sugerido?.toUpperCase()}] ${a.acao}`) || []
+          strengths: aiAnalysis.pontos_fortes || aiAnalysis.strengths || [],
+          improvements: aiAnalysis.pontos_atencao || aiAnalysis.improvements || [],
+          action_plan: (aiAnalysis.plano_acao || aiAnalysis.action_plan)?.map(a => 
+            `[${(a.prazo_sugerido || a.priority || 'N/A').toUpperCase()}] ${a.acao || a.action || a}`
+          ) || []
         };
         
         return res.json({ 
@@ -2602,13 +2947,17 @@ app.post('/api/generate-insights', authenticateToken, async (req, res) => {
           source: 'gemini-ai',
           stats: {
             totalRespondents: analysisData.totalRespondents,
-            totalResponses: analysisData.totalResponses
+            totalResponses: analysisData.totalResponses,
+            positiveRate: aiAnalysis.metricas_chave?.feedback_positivo || 'N/A'
           }
         });
         
       } catch (aiError) {
-        console.error('⚠️ Erro no Gemini, usando fallback:', aiError.message);
-        // Continua para análise estatística básica
+        console.error('⚠️ Erro crítico no Gemini AI:', aiError.message);
+        console.error('📚 Stack:', aiError.stack);
+        // Armazenar o erro para informar o usuário no fallback
+        var aiErrorMessage = aiError.message;
+        // Continua para análise estatística básica como fallback
       }
     }
 
@@ -2630,10 +2979,14 @@ app.post('/api/generate-insights', authenticateToken, async (req, res) => {
         totalScore += parseFloat(q.average) * q.totalResponses;
         countRating += q.totalResponses;
         
-        if (parseFloat(q.average) >= 4) {
-          analysis.strengths.push(`"${q.text.substring(0, 50)}..." - Média alta: ${q.average}`);
-        } else if (parseFloat(q.average) < 3) {
-          analysis.improvements.push(`"${q.text.substring(0, 50)}..." - Média baixa: ${q.average}`);
+        const is10Scale = q.type === 'rating_10';
+        const highThreshold = is10Scale ? 8 : 4;
+        const lowThreshold = is10Scale ? 6 : 3;
+
+        if (parseFloat(q.average) >= highThreshold) {
+          analysis.strengths.push(`"${q.text.substring(0, 50)}..." - Média alta: ${q.average}/${is10Scale ? 10 : 5}`);
+        } else if (parseFloat(q.average) < lowThreshold) {
+          analysis.improvements.push(`"${q.text.substring(0, 50)}..." - Média baixa: ${q.average}/${is10Scale ? 10 : 5}`);
         }
       }
       
@@ -2661,13 +3014,19 @@ app.post('/api/generate-insights', authenticateToken, async (req, res) => {
       });
     });
     
-    // Gerar insights baseados nos dados
-    if (overallAverage >= 4) {
-      analysis.strengths.push(`Satisfação geral alta (média ${overallAverage}/5)`);
-    } else if (overallAverage >= 3) {
-      analysis.improvements.push(`Satisfação moderada (média ${overallAverage}/5) - há espaço para melhorias`);
+    // Nota: overallAverage aqui é uma média ponderada. Se houver mistura de escalas (5 e 10), 
+    // a interpretação simplista abaixo pode ser imprecisa, mas serve como fallback.
+    const isMainly10Scale = analysisData.questionStats.some(q => q.type === 'rating_10' && q.totalResponses > 0);
+    const highOverall = isMainly10Scale ? 8 : 4;
+    const lowOverall = isMainly10Scale ? 6 : 3;
+    const maxScale = isMainly10Scale ? 10 : 5;
+
+    if (overallAverage >= highOverall) {
+      analysis.strengths.push(`Satisfação geral alta (média ${overallAverage}/${maxScale})`);
+    } else if (overallAverage >= lowOverall) {
+      analysis.improvements.push(`Satisfação moderada (média ${overallAverage}/${maxScale}) - há espaço para melhorias`);
     } else if (overallAverage > 0) {
-      analysis.improvements.push(`Satisfação baixa (média ${overallAverage}/5) - requer atenção imediata`);
+      analysis.improvements.push(`Satisfação baixa (média ${overallAverage}/${maxScale}) - requer atenção imediata`);
     }
     
     if (positiveCount > negativeCount) {
@@ -2676,7 +3035,12 @@ app.post('/api/generate-insights', authenticateToken, async (req, res) => {
       analysis.improvements.push(`Detectados ${negativeCount} comentários com termos negativos`);
       analysis.action_plan.push("Revisar comentários de texto para identificar problemas específicos");
     }
-    
+
+    if (typeof aiErrorMessage !== 'undefined' && aiErrorMessage) {
+      analysis.improvements.push(`ERRO DA IA: ${aiErrorMessage}`);
+      analysis.action_plan.push("Verifique se a sua GEMINI_API_KEY é válida e tem permissão para o modelo gemini-flash-latest.");
+    }
+
     analysis.strengths.push(`${analysisData.totalRespondents} pessoas responderam ao questionário`);
     
     // Plano de ação básico
@@ -2696,15 +3060,20 @@ app.post('/api/generate-insights', authenticateToken, async (req, res) => {
     
     console.log('✅ Análise estatística concluída');
     
+    const totalSentiment = positiveCount + negativeCount;
+    const positiveRate = totalSentiment > 0 ? Math.round((positiveCount / totalSentiment) * 100) + '%' : 'N/A';
+
     res.json({ 
       success: true, 
       analysis,
       detailed: null,
       source: 'statistical-analysis',
+      aiError: typeof aiErrorMessage !== 'undefined' ? aiErrorMessage : null,
+      message: typeof aiErrorMessage !== 'undefined' ? `Aviso: A IA falhou (${aiErrorMessage}). Usando fallback.` : "Sucesso",
       stats: {
         totalRespondents: analysisData.totalRespondents,
         totalResponses: analysisData.totalResponses,
-        overallAverage
+        positiveRate
       }
     });
 

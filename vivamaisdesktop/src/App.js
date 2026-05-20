@@ -1,6 +1,6 @@
 import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { ThemeProvider, createTheme } from '@mui/material';
+import { ThemeContextProvider } from './context/ThemeContext';
 import AdminLayout from './components/AdminLayout';
 import AdminDashboardPage from './components/AdminDashboardPage';
 import QuestionnaireManagerPage from './components/QuestionnaireManagerPage';
@@ -12,14 +12,6 @@ import UserDashboardPage from './components/UserDashboardPage';
 import AnswerQuestionnairePage from './components/AnswerQuestionnairePage';
 import PublicTVDashboard from './components/PublicTVDashboard';
 // import { loadModels } from './services/faceRecognition';
-
-
-
-const theme = createTheme({
-    typography: {
-        fontFamily: '"Open Sans", sans-serif',
-    },
-});
 
 const ProtectedRoute = ({ children, requiredRole }) => {
     const userStr = localStorage.getItem('user_data');
@@ -41,7 +33,7 @@ const ProtectedRoute = ({ children, requiredRole }) => {
 
 function App() {
     return (
-        <ThemeProvider theme={theme}>
+        <ThemeContextProvider>
             <BrowserRouter>
                 <Routes>
                     <Route path="/login" element={<LoginPage />} />
@@ -67,7 +59,7 @@ function App() {
                     <Route path="*" element={<Navigate to="/" />} />
                 </Routes>
             </BrowserRouter>
-        </ThemeProvider>
+        </ThemeContextProvider>
     );
 }
 

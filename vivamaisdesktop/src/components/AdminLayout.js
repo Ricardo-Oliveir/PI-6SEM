@@ -7,9 +7,12 @@ import {
     Assignment as SurveyIcon, 
     AutoAwesome as IAIcon,
     ExitToApp as LogoutIcon,
-    Menu as MenuIcon
+    Menu as MenuIcon,
+    Brightness4 as Brightness4Icon,
+    Brightness7 as Brightness7Icon
 } from '@mui/icons-material';
 import { useNavigate, useLocation, Outlet } from 'react-router-dom';
+import { useColorMode } from '../context/ThemeContext';
 import logo from '../img/logo-sem-fundo.png';
 
 const drawerWidth = 280;
@@ -18,6 +21,7 @@ function AdminLayout() {
     const navigate = useNavigate();
     const location = useLocation();
     const theme = useTheme();
+    const { mode, toggleColorMode } = useColorMode();
     const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
     const isTablet = useMediaQuery(theme.breakpoints.between('sm', 'lg'));
     const [mobileOpen, setMobileOpen] = useState(false);
@@ -46,14 +50,14 @@ function AdminLayout() {
     };
 
     const drawerContent = (
-        <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%', bgcolor: '#fff' }}>
+        <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%', bgcolor: 'background.paper', color: 'text.primary' }}>
             <Box sx={{ p: 4, textAlign: 'center' }}>
                 <img src={logo} alt="Vida Mais" style={{ width: '160px' }} />
-                <Typography variant="caption" sx={{ display: 'block', color: '#1b5e20', fontWeight: 'bold', mt: 1 }}>PORTAL ADMIN</Typography>
+                <Typography variant="caption" sx={{ display: 'block', color: 'primary.main', fontWeight: 'bold', mt: 1 }}>PORTAL ADMIN</Typography>
             </Box>
 
             <List sx={{ px: 2, flexGrow: 1 }}>
-                <Typography variant="overline" sx={{ px: 2, color: '#999', fontWeight: 'bold' }}>MENU PRINCIPAL</Typography>
+                <Typography variant="overline" sx={{ px: 2, color: 'text.secondary', fontWeight: 'bold' }}>MENU PRINCIPAL</Typography>
                 {menuItems.map((item) => (
                     <ListItem 
                         button 
@@ -75,18 +79,38 @@ function AdminLayout() {
                                 '&:hover': { bgcolor: '#0a2a0e !important' }
                             },
                             '&:hover': {
-                                bgcolor: 'rgba(27, 94, 32, 0.08)'
+                                bgcolor: mode === 'light' ? 'rgba(27, 94, 32, 0.08)' : 'rgba(255, 255, 255, 0.08)'
                             }
                         }}
                     >
-                        <ListItemIcon sx={{ color: isSelected(item.path) ? '#fff' : '#1b5e20' }}>{item.icon}</ListItemIcon>
+                        <ListItemIcon sx={{ color: isSelected(item.path) ? '#fff' : 'primary.main' }}>{item.icon}</ListItemIcon>
                         <ListItemText primary={item.text} />
                     </ListItem>
                 ))}
             </List>
 
             <Divider />
-            <List sx={{ px: 2, py: 2 }}>
+            <List sx={{ px: 2, py: 1 }}>
+                <ListItem 
+                    button 
+                    onClick={toggleColorMode} 
+                    sx={{ 
+                        borderRadius: 2, 
+                        mb: 1,
+                        color: 'text.primary',
+                        '&:hover': {
+                            bgcolor: mode === 'light' ? 'rgba(0, 0, 0, 0.04)' : 'rgba(255, 255, 255, 0.08)'
+                        }
+                    }}
+                >
+                    <ListItemIcon sx={{ color: 'primary.main' }}>
+                        {mode === 'dark' ? <Brightness7Icon /> : <Brightness4Icon />}
+                    </ListItemIcon>
+                    <ListItemText 
+                        primary={mode === 'dark' ? "MODO CLARO" : "MODO ESCURO"} 
+                        primaryTypographyProps={{ fontWeight: 'bold' }} 
+                    />
+                </ListItem>
                 <ListItem button onClick={handleLogout} sx={{ color: '#d32f2f', borderRadius: 2 }}>
                     <ListItemIcon><LogoutIcon sx={{ color: '#d32f2f' }} /></ListItemIcon>
                     <ListItemText primary="SAIR DO SISTEMA" primaryTypographyProps={{ fontWeight: 'bold' }} />
@@ -96,9 +120,9 @@ function AdminLayout() {
     );
 
     return (
-        <Box sx={{ display: 'flex', minHeight: '100vh', bgcolor: '#f4f6f8' }}>
+        <Box sx={{ display: 'flex', minHeight: '100vh', bgcolor: 'background.default', color: 'text.primary' }}>
             {(isMobile || isTablet) && (
-                <AppBar position="fixed" sx={{ zIndex: theme.zIndex.drawer + 1, bgcolor: '#fff', color: '#333' }}>
+                <AppBar position="fixed" sx={{ zIndex: theme.zIndex.drawer + 1, bgcolor: 'background.paper', color: 'text.primary', borderBottom: '1px solid', borderColor: 'divider', boxShadow: 'none' }}>
                     <Toolbar>
                         <IconButton
                             color="inherit"
@@ -112,8 +136,9 @@ function AdminLayout() {
                         <Box sx={{ flexGrow: 1, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
                             <img src={logo} alt="Vida Mais" style={{ height: '35px', marginTop: '4px' }} />
                         </Box>
-                        {/* Placeholder box for spacing right to center image */}
-                        <Box sx={{ width: 48 }} /> 
+                        <IconButton onClick={toggleColorMode} color="inherit">
+                            {mode === 'dark' ? <Brightness7Icon /> : <Brightness4Icon />}
+                        </IconButton>
                     </Toolbar>
                 </AppBar>
             )}
@@ -146,7 +171,8 @@ function AdminLayout() {
                     width: { lg: `calc(100% - ${drawerWidth}px)` },
                     overflowY: 'auto',
                     height: '100vh',
-                    boxSizing: 'border-box'
+                    boxSizing: 'border-box',
+                    bgcolor: 'background.default'
                 }}
             >
                 <Outlet />

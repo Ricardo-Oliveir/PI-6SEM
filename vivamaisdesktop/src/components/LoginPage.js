@@ -156,7 +156,8 @@ function LoginPage() {
                                 label="Usuário"
                                 fullWidth
                                 value={username}
-                                onChange={e => setUsername(e.target.value)}
+                                onChange={e => setUsername(e.target.value.toLowerCase())}
+                                placeholder="ex: joaosilva"
                             />
                             <TextField
                                 label="Senha"
