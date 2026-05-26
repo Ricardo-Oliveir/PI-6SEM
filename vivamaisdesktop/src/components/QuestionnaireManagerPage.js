@@ -140,6 +140,17 @@ function QuestionnaireManagerPage() {
             const resp = await api.get(`/questionnaires/${questionnaire.id}/responses`);
             const responses = resp.data || [];
             
+            // Buscar total de usuários para cálculo real de engajamento
+            let totalActiveUsers = 50; // fallback
+            try {
+                const dashResp = await api.get('/dashboard-data');
+                if (dashResp.data && dashResp.data.totalUsers) {
+                    totalActiveUsers = dashResp.data.totalUsers;
+                }
+            } catch (err) {
+                console.warn('Não foi possível obter o total de usuários', err);
+            }
+            
             // Simular dados adicionais para o "WOW" factor
             let sum = 0;
             let count = 0;
@@ -167,7 +178,7 @@ function QuestionnaireManagerPage() {
                 total: sessionCount,
                 average: count > 0 ? (sum / count).toFixed(1) : (Math.random() * 2 + 3).toFixed(1), // Fallback visual
                 topAnswers: sortedAnswers,
-                participation: Math.round((sessionCount / 50) * 100) // Simulação de taxa contra meta
+                participation: totalActiveUsers > 0 ? Math.round((sessionCount / totalActiveUsers) * 100) : 0
             });
         } catch (error) {
             console.error('Erro quick view:', error);

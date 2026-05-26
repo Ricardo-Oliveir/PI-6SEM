@@ -33,14 +33,17 @@ api.interceptors.request.use((config) => {
     return Promise.reject(error);
 });
 
-// Interceptor de resposta: Lida apenas com erros fatais de autenticação
+// Interceptor de resposta: Redireciona para login quando o token expira
 api.interceptors.response.use(
     response => response,
     error => {
-        // Se recebermos 401 (Não autorizado), significa que o token realmente não é mais válido
         if (error.response?.status === 401) {
-            console.warn("Sessão expirada ou inválida. Redirecionando para login...");
-            // Opcional: localStorage.clear(); window.location.href = '/login';
+            // Token expirado ou inválido — limpa sessão e redireciona
+            localStorage.removeItem('token');
+            localStorage.removeItem('user_data');
+            if (window.location.pathname !== '/login') {
+                window.location.href = '/login';
+            }
         }
         return Promise.reject(error);
     }

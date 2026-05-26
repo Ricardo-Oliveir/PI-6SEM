@@ -11,23 +11,40 @@ import UserLayout from './components/UserLayout';
 import UserDashboardPage from './components/UserDashboardPage';
 import AnswerQuestionnairePage from './components/AnswerQuestionnairePage';
 import PublicTVDashboard from './components/PublicTVDashboard';
-// import { loadModels } from './services/faceRecognition';
+import ResponsesViewPage from './components/ResponsesViewPage';
 
 const ProtectedRoute = ({ children, requiredRole }) => {
     const userStr = localStorage.getItem('user_data');
     if (!userStr) return <Navigate to="/login" />;
-    
-    const user = JSON.parse(userStr);
-    
+
+    let user;
+    try {
+        user = JSON.parse(userStr);
+    } catch {
+        localStorage.clear();
+        return <Navigate to="/login" />;
+    }
+
+    if (!user || !user.role) {
+        localStorage.clear();
+        return <Navigate to="/login" />;
+    }
+
+    // Admin tentando acessar área de usuário → redireciona para dashboard admin
+    if (requiredRole === 'user' && user.role === 'admin') {
+        return <Navigate to="/dashboard" />;
+    }
+
+    // Usuário comum tentando acessar área admin → redireciona para dashboard usuário
     if (requiredRole === 'admin' && user.role !== 'admin') {
         return <Navigate to="/user-dashboard" />;
     }
-    
+
     if (requiredRole === 'auto') {
-         if (user.role === 'admin') return <Navigate to="/dashboard" />;
-         else return <Navigate to="/user-dashboard" />;
+        if (user.role === 'admin') return <Navigate to="/dashboard" />;
+        else return <Navigate to="/user-dashboard" />;
     }
-    
+
     return children;
 };
 
@@ -43,12 +60,13 @@ function App() {
                     <Route path="/" element={<ProtectedRoute requiredRole="admin"><AdminLayout /></ProtectedRoute>}>
                         <Route path="dashboard" element={<AdminDashboardPage />} />
                         <Route path="questionarios" element={<QuestionnaireManagerPage />} />
+                        <Route path="questionarios/:questionnaireId/respostas" element={<ResponsesViewPage />} />
                         <Route path="insights" element={<InsightsPage />} />
                         <Route path="usuarios" element={<UserManagerPage />} />
                     </Route>
 
-                    {/* USER ROUTES */}
-                    <Route path="/" element={<ProtectedRoute><UserLayout /></ProtectedRoute>}>
+                    {/* USER ROUTES - apenas usuários com role 'user' */}
+                    <Route path="/" element={<ProtectedRoute requiredRole="user"><UserLayout /></ProtectedRoute>}>
                         <Route path="user-dashboard" element={<UserDashboardPage />} />
                         <Route path="responder/questionario/:id" element={<AnswerQuestionnairePage />} />
                     </Route>

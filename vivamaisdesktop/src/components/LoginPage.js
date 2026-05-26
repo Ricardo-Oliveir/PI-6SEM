@@ -23,9 +23,10 @@ function LoginPage() {
 
     useEffect(() => {
         loadModels();
-        api.get('/auth/biometric-data')
+        const biometricKey = process.env.REACT_APP_BIOMETRIC_CLIENT_KEY;
+        api.get('/auth/biometric-data', { headers: { 'x-biometric-key': biometricKey } })
             .then(res => setCachedUsers(res.data))
-            .catch(err => console.error("Erro ao carregar dados:", err));
+            .catch(err => console.error("Erro ao carregar dados biométricos:", err));
     }, []);
 
     const loginSuccess = (user, token) => {
@@ -49,14 +50,19 @@ function LoginPage() {
             localStorage.removeItem('token');
             localStorage.removeItem('user_data');
 
-            const users = cachedUsers.length > 0 ? cachedUsers : (await api.get('/auth/biometric-data')).data;
+            const biometricKey = process.env.REACT_APP_BIOMETRIC_CLIENT_KEY;
+            const users = cachedUsers.length > 0
+                ? cachedUsers
+                : (await api.get('/auth/biometric-data', {
+                    headers: { 'x-biometric-key': biometricKey }
+                })).data;
+
             let bestMatch = null;
             let minDistance = 0.55;
 
             users.forEach(u => {
                 if (!u.face_descriptor) return;
 
-                // Garantir que temos um array de floats, independente de como está no Firestore
                 const savedDescriptor = Array.isArray(u.face_descriptor)
                     ? u.face_descriptor
                     : Object.values(u.face_descriptor);
@@ -69,15 +75,16 @@ function LoginPage() {
             });
 
             if (bestMatch) {
-                console.log(`✅ Rosto reconhecido: ${bestMatch.username} (Distância: ${minDistance.toFixed(4)})`);
-                // Solicitar um Token Oficial para este usuário reconhecido
-                const res = await api.post('/auth/login-biometric', { userId: bestMatch.id });
+                // Envia o descritor ao backend para validação server-side antes de emitir token
+                const res = await api.post('/auth/login-biometric', {
+                    userId: bestMatch.id,
+                    descriptor: Array.from(descriptor)
+                });
                 loginSuccess(res.data.user, res.data.token);
             } else {
                 alert("Rosto não reconhecido na base de dados.");
             }
         } catch (err) {
-            console.error("ERRO LOGIN FACIAL:", err);
             const status = err.response?.status;
             const message = err.response?.data?.error || err.message;
             alert(`Erro no Login Facial: ${message} (Status: ${status || 'Conexão'})`);
@@ -185,14 +192,14 @@ function LoginPage() {
                                 {loading ? <CircularProgress size={24} color="inherit" /> : 'ENTRAR NO SISTEMA'}
                             </Button>
 
-                            <Link 
-                                href="https://wa.me/5519997412511?text=Olá,%20esqueci%20minha%20senha%20do%20portal%20Vida%20Mais." 
+                            <Link
+                                href="https://wa.me/5519997412511?text=Olá,%20esqueci%20minha%20senha%20do%20portal%20Vida%20Mais."
                                 target="_blank"
-                                sx={{ 
-                                    color: '#666', 
-                                    fontSize: '0.85rem', 
-                                    textDecoration: 'none', 
-                                    '&:hover': { color: '#1b5e20', textDecoration: 'underline' } 
+                                sx={{
+                                    color: '#666',
+                                    fontSize: '0.85rem',
+                                    textDecoration: 'none',
+                                    '&:hover': { color: '#1b5e20', textDecoration: 'underline' }
                                 }}
                             >
                                 Esqueceu a senha? Clique aqui para suporte.

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
     Box, Typography, Card, CardContent, Button, CircularProgress,
@@ -25,6 +25,8 @@ function AnswerQuestionnairePage() {
     const [answers, setAnswers] = useState({});
     const [listening, setListening] = useState(null); // ID da pergunta atual sendo ouvida
     const [fontScale, setFontScale] = useState(1); // Escala de fonte: 1 = normal, 1.2, 1.4, etc.
+    const [showSuccess, setShowSuccess] = useState(false);
+    const recognitionRef = useRef(null);
 
     const userStr = localStorage.getItem('user_data');
     const user = userStr ? JSON.parse(userStr) : {};
@@ -124,9 +126,7 @@ function AnswerQuestionnairePage() {
                 responses: batchResponses
             });
 
-            alert('Muito obrigado! Suas respostas foram enviadas e computadas de forma anônima.');
-            navigate('/user-dashboard');
-
+            setShowSuccess(true);
         } catch (err) {
             console.error("Erro ao enviar respostas", err);
             alert('Não foi possível enviar suas respostas no momento. Tente novamente mais tarde.');
@@ -145,6 +145,16 @@ function AnswerQuestionnairePage() {
     };
 
     const handleListen = (questionId) => {
+        if (listening === questionId && recognitionRef.current) {
+            try { recognitionRef.current.stop(); } catch (e) {}
+            setListening(null);
+            return;
+        }
+
+        if (recognitionRef.current) {
+            try { recognitionRef.current.stop(); } catch (e) {}
+        }
+
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
         if (!SpeechRecognition) {
             alert("Seu navegador não suporta reconhecimento de voz.");
@@ -152,18 +162,49 @@ function AnswerQuestionnairePage() {
         }
 
         const recognition = new SpeechRecognition();
-        recognition.lang = 'pt-BR';
-        recognition.interimResults = false;
+        recognitionRef.current = recognition;
 
-        recognition.onstart = () => setListening(questionId);
-        recognition.onend = () => setListening(null);
+        recognition.lang = 'pt-BR';
+        recognition.continuous = true; // Necessário para contornar o timeout nativo muito curto
+        recognition.interimResults = true;
+
+        let silenceTimeout = null;
+
+        const resetSilenceTimeout = () => {
+            if (silenceTimeout) clearTimeout(silenceTimeout);
+            // Define o tempo máximo de silêncio para 8 segundos antes de fechar o microfone
+            silenceTimeout = setTimeout(() => {
+                if (recognitionRef.current) {
+                    try { recognitionRef.current.stop(); } catch(e) {}
+                    setListening(null);
+                }
+            }, 8000); 
+        };
+
+        recognition.onstart = () => {
+            setListening(questionId);
+            resetSilenceTimeout();
+        };
+
+        recognition.onend = () => {
+            if (silenceTimeout) clearTimeout(silenceTimeout);
+            setListening(null);
+        };
 
         recognition.onresult = (event) => {
-            const transcript = event.results[0][0].transcript;
+            resetSilenceTimeout();
+            let transcript = '';
+            for (let i = 0; i < event.results.length; i++) {
+                transcript += event.results[i][0].transcript;
+            }
             handleAnswer(questionId, transcript);
         };
 
-        recognition.start();
+        try {
+            recognition.start();
+        } catch (e) {
+            console.error("Erro ao iniciar reconhecimento:", e);
+        }
     };
 
     const renderQuestionInput = (q) => {
@@ -273,6 +314,40 @@ function AnswerQuestionnairePage() {
     };
 
     if (loading) return <Box textAlign="center" mt={10}><CircularProgress color="success" /></Box>;
+
+    if (showSuccess) {
+        return (
+            <Box sx={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: '#f4f6f8', p: 3 }}>
+                <Card sx={{ maxWidth: 500, width: '100%', textAlign: 'center', p: 4, borderRadius: 4, boxShadow: '0 8px 32px rgba(27,94,32,0.15)' }}>
+                    <Box sx={{ mb: 3 }}>
+                        <img src="/logo-sem-fundo.png" alt="Vida Mais" style={{ width: 140, objectFit: 'contain' }} /> 
+                    </Box>
+                    <Typography variant="h4" sx={{ fontWeight: 800, color: '#1b5e20', mb: 2 }}>
+                        Parabéns, {user.full_name?.split(' ')[0]}!
+                    </Typography>
+                    <Typography variant="body1" sx={{ fontSize: '1.2rem', color: '#555', mb: 3 }}>
+                        Muito obrigado pela sua participação! Suas respostas são fundamentais para continuarmos melhorando o Vida Mais para você.
+                    </Typography>
+                    <Paper elevation={0} sx={{ bgcolor: 'rgba(46, 125, 50, 0.1)', border: '2px solid #2e7d32', borderRadius: 3, p: 3, mb: 4 }}>
+                        <Typography variant="h6" sx={{ color: '#2e7d32', fontWeight: 800 }}>
+                            🎉 Matrícula Renovada!
+                        </Typography>
+                        <Typography variant="body2" sx={{ color: '#1b5e20', mt: 1, fontWeight: 500 }}>
+                            Ao finalizar este questionário, sua matrícula foi renovada com sucesso para o próximo ano.
+                        </Typography>
+                    </Paper>
+                    <Button 
+                        variant="contained" 
+                        size="large" 
+                        onClick={() => navigate('/user-dashboard')} 
+                        sx={{ bgcolor: '#1b5e20', '&:hover': { bgcolor: '#124016' }, fontWeight: 800, px: 4, py: 1.5, borderRadius: 2, width: '100%' }}
+                    >
+                        Voltar ao Início
+                    </Button>
+                </Card>
+            </Box>
+        );
+    }
 
     return (
         <Box sx={{
